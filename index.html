@@ -505,6 +505,23 @@ header {
 .hist-content { flex: 1; min-width: 0; }
 .hist-translated { font-size: 13px; color: var(--text); line-height: 1.5; }
 .hist-original { font-size: 11px; color: var(--text-sub); margin-top: 2px; }
+.hist-entry.photo { border-left-color: #3b82f6; }
+.hist-thumb { max-height: 90px; max-width: 100%; border-radius: 6px; cursor: zoom-in; display: block; }
+.shot-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+.cam-overlay, .photo-view {
+  position: fixed; inset: 0; z-index: 300; background: #000;
+  display: none; flex-direction: column; align-items: center; justify-content: center;
+}
+.cam-overlay video { width: 100%; flex: 1; min-height: 0; object-fit: contain; background: #000; }
+.cam-bar { width: 100%; display: flex; align-items: center; justify-content: space-between; padding: 14px 22px 26px; gap: 12px; }
+.cam-bar button.cam-close { padding: 10px 16px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.3); background: transparent; color: #fff; font-size: 15px; }
+.cam-shutter { width: 72px; height: 72px; border-radius: 50%; border: 5px solid #fff; background: #ef4444; cursor: pointer; }
+.cam-shutter:active { transform: scale(0.94); }
+.cam-info { color: #cbd5e1; font-size: 13px; min-width: 70px; text-align: right; }
+.cam-note { color: #94a3b8; font-size: 12px; padding: 8px 16px 0; text-align: center; }
+.cam-flash { position: fixed; inset: 0; background: #fff; opacity: 0; pointer-events: none; z-index: 310; transition: opacity 0.25s; }
+.photo-view img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.photo-view { cursor: zoom-out; }
 
 /* Scrollbar */
 ::-webkit-scrollbar { width: 3px; }
@@ -734,6 +751,19 @@ body.mobile .field input, body.mobile .field select { font-size: 16px; } /* iOS 
   </div>
 </div>
 
+<!-- ===== CAMERA (iPhone) ===== -->
+<div class="cam-overlay" id="camOverlay">
+  <div class="cam-note">会場のスクリーンに向けて撮影してください。撮影中も翻訳は続きます</div>
+  <video id="camVideo" playsinline muted autoplay></video>
+  <div class="cam-bar">
+    <button class="cam-close" onclick="closeCamera()">閉じる</button>
+    <button class="cam-shutter" onclick="shootCamera()" aria-label="撮影"></button>
+    <span class="cam-info" id="camInfo"></span>
+  </div>
+</div>
+<div class="cam-flash" id="camFlash"></div>
+<div class="photo-view" id="photoView" onclick="this.style.display='none'"><img id="photoViewImg" alt=""></div>
+
 <!-- ===== HEADER ===== -->
 <header>
   <div class="header-left">
@@ -789,6 +819,8 @@ body.mobile .field input, body.mobile .field select { font-size: 16px; } /* iOS 
   </span>
 
   <!-- TTS（翻訳音声）トグル -->
+  <button class="source-btn shot-btn" id="shotBtn" onclick="takeShot()" style="display:none" title="画面共有中のスライドを撮影して字幕ログに追加">📸 スクショ</button>
+
   <label class="tts-toggle-label" id="ttsToggleLabel" title="翻訳音声の読み上げON/OFF">
     <input type="checkbox" id="ttsToggle" checked onchange="onTtsToggle(this)">
     翻訳音声
@@ -853,6 +885,7 @@ body.mobile .field input, body.mobile .field select { font-size: 16px; } /* iOS 
       <span class="history-count" id="histCount">0</span>
     </div>
     <div style="display:flex;gap:6px">
+      <button class="btn-clear-hist" onclick="downloadReport()" title="字幕と写真を時系列に並べた HTML を保存">レポート出力</button>
       <button class="btn-clear-hist" onclick="downloadCSV()">CSV出力</button>
       <button class="btn-clear-hist" onclick="clearHistory()">クリア</button>
     </div>
@@ -1002,6 +1035,7 @@ function toggleSource() {
 }
 
 function updateSourceUI() {
+  setTimeout(updateShotButton, 0);
   const isSys = (audioSource === 'system');
   const btn   = document.getElementById('sourceToggleBtn');
   btn.textContent = isSys ? '🖥 システム音声' : '🎤 マイク';
@@ -1224,6 +1258,7 @@ function isReady(c) {
   updateEngineFields();
   renderCost();
   applyUiMode(getUiMode());
+  setTimeout(restoreTimeline, 0);   // スクリプト全体の読み込み後に復元
 })();
 
 document.getElementById('volSlider').addEventListener('input', e => {
@@ -1667,6 +1702,7 @@ function stopLive(reason) {
   if (window._liveMicStream)     { window._liveMicStream.getTracks().forEach(t => t.stop()); window._liveMicStream = null; }
   // システム音声モード: displayStream の残トラックも全停止
   if (window._liveDisplayStream) { window._liveDisplayStream.getTracks().forEach(t => t.stop()); window._liveDisplayStream = null; }
+  if (window._shotVideo) { try { window._shotVideo.srcObject = null; } catch (_) {} window._shotVideo = null; }
   // Web Speech API の読み上げ中断
   if (window.speechSynthesis) window.speechSynthesis.cancel();
 
@@ -2036,6 +2072,7 @@ function setUILive(live) {
   btn.className = `btn-toggle ${live ? 'stop' : 'start'}`;
   btn.textContent = live ? '■ 停止' : '▶ 開始';
   wave.classList.toggle('active', live);
+  updateShotButton();
 }
 
 // ★ インタリム表示: 翻訳テキストをメインに、原文を小さく下に添える
@@ -2146,70 +2183,315 @@ function updateQueueBadge() {
   el.classList.toggle('visible', n > 0);
 }
 
+// ===== 字幕ログ（字幕と写真を1本のタイムラインで管理）=====
+const ENGINE_LABEL = { llm: 'LLM', nmt: '機械翻訳(代替)', speech: 'Speech翻訳', source: '翻訳失敗' };
+
+function stampNow() {
+  const now = new Date();
+  return {
+    ts:   now.getTime(),
+    time: now.toLocaleTimeString('ja-JP', { hour:'2-digit', minute:'2-digit', second:'2-digit' }),
+    date: now.toLocaleDateString('ja-JP', { year:'numeric', month:'2-digit', day:'2-digit' }),
+  };
+}
+
 function addHistory(original, translated, engine = 'speech') {
-  const body  = document.getElementById('histBody');
-  const empty = body.querySelector('.hist-empty');
-  if (empty) empty.remove();
-
-  histCount++;
-  document.getElementById('histCount').textContent = histCount;
-
-  const now  = new Date();
-  const time = now.toLocaleTimeString('ja-JP', { hour:'2-digit', minute:'2-digit', second:'2-digit' });
-  const date = now.toLocaleDateString('ja-JP', { year:'numeric', month:'2-digit', day:'2-digit' });
-
-  // CSV用データを構造化して保持
-  histData.push({
-    no:         histCount,
-    date,
-    time,
+  pushRecord({
+    kind: 'text',
+    ...stampNow(),
     srcLang:    LANGS[cfg.srcLang]?.name || cfg.srcLang,
     tgtLang:    LANGS[cfg.tgtLang]?.name || cfg.tgtLang,
     original,
     translated,
-    engine: { llm: 'LLM', nmt: '機械翻訳(代替)', speech: 'Speech翻訳', source: '翻訳失敗' }[engine] || engine,
+    engine: ENGINE_LABEL[engine] || engine,
   });
+}
+
+function addPhotoRecord(dataUrl, source) {
+  return pushRecord({ kind: 'photo', ...stampNow(), source, dataUrl });
+}
+
+function pushRecord(rec) {
+  histCount++;
+  rec.no = histCount;
+  histData.push(rec);
+  renderRecord(rec);
+  TL.put(rec);
+  return rec;
+}
+
+function renderRecord(rec) {
+  const body  = document.getElementById('histBody');
+  const empty = body.querySelector('.hist-empty');
+  if (empty) empty.remove();
+  document.getElementById('histCount').textContent = histData.length;
 
   const entry = document.createElement('div');
-  entry.className = 'hist-entry';
-  entry.innerHTML = `
-    <div class="hist-time">${time}</div>
-    <div class="hist-content">
-      <div class="hist-translated">${esc(translated)}</div>
-      <div class="hist-original">${esc(original)}</div>
-    </div>`;
+  if (rec.kind === 'photo') {
+    entry.className = 'hist-entry photo';
+    entry.innerHTML = `
+      <div class="hist-time">${esc(rec.time)}</div>
+      <div class="hist-content">
+        <img class="hist-thumb" alt="写真 ${rec.no}" src="${rec.dataUrl}">
+        <div class="hist-original">${rec.source === 'camera' ? '📷 写真' : '📸 スクショ'}</div>
+      </div>`;
+    entry.querySelector('img').addEventListener('click', () => viewPhoto(rec.dataUrl));
+  } else {
+    entry.className = 'hist-entry';
+    entry.innerHTML = `
+      <div class="hist-time">${esc(rec.time)}</div>
+      <div class="hist-content">
+        <div class="hist-translated">${esc(rec.translated)}</div>
+        <div class="hist-original">${esc(rec.original)}</div>
+      </div>`;
+  }
   body.appendChild(entry);
   body.scrollTop = body.scrollHeight;
 }
 
+function viewPhoto(dataUrl) {
+  document.getElementById('photoViewImg').src = dataUrl;
+  document.getElementById('photoView').style.display = 'flex';
+}
+
 function clearHistory() {
+  const photos = histData.filter(r => r.kind === 'photo').length;
+  if (histData.length && !confirm(`字幕ログ${photos ? `と写真${photos}枚` : ''}を消去します。先に「レポート出力」で保存しましたか？`)) return;
   histCount = 0;
   histData  = [];
+  TL.clear();
   document.getElementById('histCount').textContent = '0';
   document.getElementById('histBody').innerHTML = '<div class="hist-empty">翻訳が確定すると、ここに字幕ログが表示されます</div>';
 }
 
+function fileStamp() {
+  const d = new Date(), z = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${z(d.getMonth() + 1)}-${z(d.getDate())}-${z(d.getHours())}${z(d.getMinutes())}`;
+}
+
+function saveBlob(blob, name) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 30000);   // iOS はすぐ解放すると保存に失敗するため
+}
+
 function downloadCSV() {
   if (histData.length === 0) { alert('出力するログがありません。'); return; }
+  const cell = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
+  const header = ['No', '日付', '時刻', '発話言語', '翻訳先言語', '発話テキスト', '翻訳テキスト', '翻訳方式', '種別'];
+  const rows = histData.map(r => (r.kind === 'photo'
+    ? [r.no, r.date, r.time, '', '', '', r.source === 'camera' ? '[写真]' : '[スクショ]', '', '写真']
+    : [r.no, r.date, r.time, r.srcLang, r.tgtLang, r.original, r.translated, r.engine || '', '字幕']
+  ).map(cell).join(','));
+  const csv = '﻿' + [header.map(cell).join(','), ...rows].join('\r\n');
+  saveBlob(new Blob([csv], { type: 'text/csv;charset=utf-8;' }), `live-transcript-${fileStamp()}.csv`);
+}
 
-  const cell = v => `"${String(v).replace(/"/g, '""')}"`;
+// 字幕と写真を時系列に並べた HTML（写真は埋め込み・この1ファイルで完結）
+function buildReportHtml() {
+  const first = histData[0], last = histData[histData.length - 1];
+  const photos = histData.filter(r => r.kind === 'photo').length;
+  const items = histData.map(r => r.kind === 'photo'
+    ? `<figure class="p"><div class="t">${esc(r.time)}</div><img src="${r.dataUrl}" alt="写真 ${r.no}"><figcaption>${r.source === 'camera' ? '写真' : 'スクリーンショット'}</figcaption></figure>`
+    : `<div class="s"><div class="t">${esc(r.time)}</div><div><p class="ja">${esc(r.translated)}</p><p class="en">${esc(r.original)}</p></div></div>`
+  ).join('\n');
+  return `<!DOCTYPE html>
+<html lang="ja"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>登壇翻訳ログ ${esc(first.date)}</title>
+<style>
+body{font-family:-apple-system,"Hiragino Sans","Noto Sans JP","Yu Gothic",sans-serif;max-width:860px;margin:0 auto;padding:24px 16px;color:#1f2937;background:#fff;line-height:1.6}
+h1{font-size:22px;margin:0 0 4px}.meta{color:#6b7280;font-size:13px;margin:0 0 24px}
+.s{display:grid;grid-template-columns:72px 1fr;gap:12px;padding:10px 0;border-bottom:1px solid #eef0f3}
+.t{font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#9ca3af;padding-top:3px}
+.ja{margin:0;font-size:16px}.en{margin:2px 0 0;font-size:13px;color:#6b7280}
+.p{margin:14px 0;padding:12px;background:#f8fafc;border:1px solid #e5e7eb;border-radius:10px}
+.p img{display:block;width:100%;height:auto;border-radius:6px;margin-top:6px}
+.p figcaption{font-size:12px;color:#6b7280;margin-top:6px}
+@media print{.p{break-inside:avoid}}
+</style></head><body>
+<h1>登壇翻訳ログ</h1>
+<p class="meta">${esc(first.date)} ${esc(first.time)} 〜 ${esc(last.date)} ${esc(last.time)}　／　字幕 ${histData.length - photos} 件・写真 ${photos} 枚</p>
+${items}
+</body></html>`;
+}
 
-  const header = ['No', '日付', '時刻', '発話言語', '翻訳先言語', '発話テキスト', '翻訳テキスト', '翻訳方式'];
-  const rows   = histData.map(r => [
-    r.no, r.date, r.time, r.srcLang, r.tgtLang, r.original, r.translated, r.engine || ''
-  ].map(cell).join(','));
+function downloadReport() {
+  if (histData.length === 0) { alert('出力するログがありません。'); return; }
+  saveBlob(new Blob([buildReportHtml()], { type: 'text/html;charset=utf-8' }), `live-report-${fileStamp()}.html`);
+}
 
-  const bom  = '\uFEFF';
-  const csv  = bom + [header.map(cell).join(','), ...rows].join('\r\n');
-  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-  const url  = URL.createObjectURL(blob);
+// ===== タイムラインの保存（IndexedDB。タブを閉じても字幕と写真が残る）=====
+const TL = (() => {
+  let dbp = null;
+  function open() {
+    if (dbp) return dbp;
+    dbp = new Promise(res => {
+      try {
+        if (!window.indexedDB) return res(null);
+        const r = indexedDB.open('lvTimeline', 1);
+        r.onupgradeneeded = () => r.result.createObjectStore('entries', { keyPath: 'no' });
+        r.onsuccess = () => res(r.result);
+        r.onerror = () => res(null);
+        r.onblocked = () => res(null);
+      } catch (_) { res(null); }
+    });
+    return dbp;
+  }
+  async function run(mode, fn) {
+    const db = await open();
+    if (!db) return null;
+    return new Promise(res => {
+      try {
+        const t = db.transaction('entries', mode);
+        const req = fn(t.objectStore('entries'));
+        t.oncomplete = () => res(req ? req.result : null);
+        t.onerror = t.onabort = () => res(null);
+      } catch (_) { res(null); }
+    });
+  }
+  return {
+    put:   rec => run('readwrite', st => st.put(rec)),
+    all:   ()  => run('readonly',  st => st.getAll()),
+    clear: ()  => run('readwrite', st => st.clear()),
+  };
+})();
 
-  const a  = document.createElement('a');
-  const ts = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
-  a.href     = url;
-  a.download = `live-transcript-${ts}.csv`;
-  a.click();
-  URL.revokeObjectURL(url);
+async function restoreTimeline() {
+  const recs = await TL.all();
+  if (!recs || !recs.length || histData.length) return;
+  recs.sort((a, b) => a.no - b.no);
+  for (const r of recs) { histData.push(r); renderRecord(r); }
+  histCount = recs[recs.length - 1].no;
+  const photos = recs.filter(r => r.kind === 'photo').length;
+  setStatus(`前回の字幕ログ ${recs.length - photos} 件${photos ? `・写真 ${photos} 枚` : ''}を復元しました`);
+}
+
+// ===== 撮影（PC: 画面共有中のスクショ／iPhone: ページ内カメラ）=====
+const SHOT_MAX_SIDE = 1600;   // 長辺をこのピクセルに縮小して JPEG 保存（1枚 約150〜300KB）
+
+function frameToDataUrl(video) {
+  const w = video.videoWidth, h = video.videoHeight;
+  if (!w || !h) throw new Error('映像がまだ届いていません');
+  const k = Math.min(1, SHOT_MAX_SIDE / Math.max(w, h));
+  const c = document.createElement('canvas');
+  c.width = Math.round(w * k); c.height = Math.round(h * k);
+  c.getContext('2d').drawImage(video, 0, 0, c.width, c.height);
+  return c.toDataURL('image/jpeg', 0.82);
+}
+
+function flashShot() {
+  const f = document.getElementById('camFlash');
+  f.style.opacity = '0.7';
+  setTimeout(() => { f.style.opacity = '0'; }, 120);
+}
+
+function displayVideoTrack() {
+  const st = window._liveDisplayStream;
+  return st ? st.getVideoTracks().find(t => t.readyState === 'live') || null : null;
+}
+
+function updateShotButton() {
+  const btn = document.getElementById('shotBtn');
+  if (!btn) return;
+  if (uiMode === 'mobile') {
+    btn.style.display = '';
+    btn.textContent = '📷 撮影';
+    btn.title = '会場のスクリーンを撮影して字幕ログに追加';
+    btn.disabled = false;
+  } else if (audioSource === 'system') {
+    btn.style.display = '';
+    btn.textContent = '📸 スクショ';
+    btn.title = '画面共有中のスライドを撮影して字幕ログに追加（共有中のみ）';
+    btn.disabled = !(isLive && displayVideoTrack());
+  } else {
+    btn.style.display = 'none';
+  }
+}
+
+async function takeShot() {
+  if (uiMode === 'mobile') { openCamera(); return; }
+  try {
+    const track = displayVideoTrack();
+    if (!isLive || !track) { setStatus('スクショは画面共有中のみ使えます'); return; }
+    let v = window._shotVideo;
+    if (!v || v._track !== track) {
+      v = document.createElement('video');
+      v.muted = true; v.playsInline = true;
+      v.srcObject = new MediaStream([track]);
+      v._track = track;
+      window._shotVideo = v;
+    }
+    await v.play().catch(() => {});
+    if (!v.videoWidth) await new Promise(r => { v.onloadedmetadata = r; setTimeout(r, 1500); });
+    addPhotoRecord(frameToDataUrl(v), 'screen');
+    flashShot();
+    setStatus('📸 スクショを字幕ログに追加しました');
+  } catch (e) {
+    console.warn('スクショ失敗:', e);
+    setStatus('スクショに失敗しました: ' + e.message);
+  }
+}
+
+let camStream = null, camShots = 0;
+async function openCamera() {
+  try {
+    camStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } },
+      audio: false,
+    });
+  } catch (e) {
+    alert(`カメラを起動できませんでした:\n${e.message}\n設定 → Safari → カメラ の許可を確認してください。`);
+    return;
+  }
+  camShots = 0;
+  document.getElementById('camInfo').textContent = '';
+  const v = document.getElementById('camVideo');
+  v.srcObject = camStream;
+  v.play().catch(() => {});
+  document.getElementById('camOverlay').style.display = 'flex';
+  keepAudioAlive();
+}
+
+function shootCamera() {
+  try {
+    addPhotoRecord(frameToDataUrl(document.getElementById('camVideo')), 'camera');
+    camShots++;
+    document.getElementById('camInfo').textContent = `${camShots}枚 撮影`;
+    flashShot();
+  } catch (e) {
+    alert('撮影に失敗しました: ' + e.message);
+  }
+  keepAudioAlive();
+}
+
+function closeCamera() {
+  if (camStream) camStream.getTracks().forEach(t => t.stop());
+  camStream = null;
+  document.getElementById('camVideo').srcObject = null;
+  document.getElementById('camOverlay').style.display = 'none';
+  keepAudioAlive();
+  if (camShots) setStatus(`📷 写真${camShots}枚を字幕ログに追加しました`);
+  // カメラ起動でマイクが止まっていないか確認（iOS では止まることがあるため）
+  setTimeout(checkMicAlive, 800);
+}
+
+// ボタン操作のたびに音声処理を再開させる（iOS はカメラ起動などで一時停止することがあるため）
+function keepAudioAlive() {
+  const ctx = window._liveAudioCtx;
+  if (ctx && ctx.state !== 'running') ctx.resume().catch(() => {});
+}
+function checkMicAlive() {
+  if (!isLive || audioSource !== 'mic') return;
+  const tr = window._liveMicStream?.getAudioTracks?.()[0];
+  if (tr && (tr.readyState === 'ended' || tr.muted)) {
+    setStatus('⚠ カメラの使用でマイクが止まりました。■停止 → ▶開始 で再開してください');
+    diag('audio', '⚠ マイク停止（カメラ使用後）');
+  }
 }
 
 function esc(t) {
