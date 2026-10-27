@@ -1,0 +1,2227 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>登壇翻訳 LIVE | Azure AI</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@300;400;500;700&family=Barlow:ital,wght@0,400;0,600;0,700;0,900;1,400&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/microsoft-cognitiveservices-speech-sdk@1.52.0/distrib/browser/microsoft.cognitiveservices.speech.sdk.bundle-min.js"></script>
+<style>
+:root {
+  --bg: #07090f;
+  --surface: rgba(255,255,255,0.04);
+  --surface2: rgba(255,255,255,0.07);
+  --border: rgba(255,255,255,0.07);
+  --border2: rgba(255,255,255,0.13);
+  --text: #f0f4ff;
+  --text-sub: #7a8899;
+  --text-muted: #3a4455;
+  --live: #ef4444;
+  --live-glow: rgba(239,68,68,0.25);
+  --queue: #f59e0b;
+  --interim: #3a4a60;
+  --confirm: #f8fafc;
+  --original: #5a7090;
+  --success: #22d3a5;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: 'Noto Sans JP', 'Barlow', sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  height: 100vh;
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* Subtle grain overlay */
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.03'/%3E%3C/svg%3E");
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0.4;
+}
+
+/* ===== MODAL ===== */
+.modal-overlay {
+  position: fixed; inset: 0;
+  background: rgba(7,9,15,0.95);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 200;
+  backdrop-filter: blur(12px);
+}
+.modal {
+  background: #0d1120;
+  border: 1px solid var(--border2);
+  border-radius: 20px;
+  padding: 36px;
+  width: 92%; max-width: 460px;
+  max-height: 92vh; overflow-y: auto;
+  box-shadow: 0 50px 100px rgba(0,0,0,0.7);
+}
+.section-title {
+  font-size: 12px; font-weight: 700; color: #c7d2fe;
+  margin: 22px 0 10px; padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+.field-note { font-size: 11px; color: #4a5568; margin-top: 5px; line-height: 1.5; }
+
+/* Cost meter */
+.cost-badge {
+  font-family: 'JetBrains Mono', monospace; font-size: 11px;
+  padding: 4px 9px; border-radius: 6px;
+  background: rgba(34,211,165,0.08); border: 1px solid rgba(34,211,165,0.25);
+  color: var(--success); white-space: nowrap;
+}
+.cost-badge.warn { background: rgba(245,158,11,0.12); border-color: rgba(245,158,11,0.35); color: var(--queue); }
+
+/* Pending-translation subtitle (LLM待ち) */
+.translated-text.pending { color: var(--original); font-size: clamp(18px, 2.6vw, 30px); font-weight: 500; }
+.modal-title {
+  font-family: 'Barlow', sans-serif;
+  font-size: 20px; font-weight: 700;
+  margin-bottom: 4px; letter-spacing: -0.01em;
+}
+.modal-sub { font-size: 13px; color: var(--text-sub); margin-bottom: 28px; line-height: 1.5; }
+
+.field { margin-bottom: 14px; }
+.field label {
+  display: block; font-size: 11px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.07em;
+  color: var(--text-sub); margin-bottom: 7px;
+}
+.field input, .field select {
+  width: 100%; padding: 10px 13px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  color: var(--text); font-size: 14px; outline: none;
+  transition: border-color 0.2s, box-shadow 0.2s;
+  font-family: 'JetBrains Mono', monospace;
+}
+.field select { font-family: 'Noto Sans JP', sans-serif; cursor: pointer; }
+.field input:focus, .field select:focus {
+  border-color: rgba(239,68,68,0.5);
+  box-shadow: 0 0 0 3px rgba(239,68,68,0.1);
+}
+.field select option { background: #0d1120; }
+
+.field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 14px; }
+.field-row .field { margin-bottom: 0; }
+
+.hint-box {
+  background: rgba(239,68,68,0.06);
+  border: 1px solid rgba(239,68,68,0.2);
+  border-radius: 8px; padding: 10px 13px;
+  font-size: 12px; color: #fca5a5; line-height: 1.6; margin-bottom: 22px;
+}
+
+.btn-start-modal {
+  width: 100%; padding: 13px;
+  background: linear-gradient(135deg, #dc2626, #ef4444);
+  border: none; border-radius: 11px;
+  color: white; font-size: 15px; font-weight: 700;
+  font-family: 'Barlow', sans-serif; letter-spacing: 0.03em;
+  cursor: pointer; transition: opacity 0.2s, transform 0.1s;
+}
+.btn-start-modal:hover { opacity: 0.9; }
+.btn-start-modal:active { transform: scale(0.98); }
+
+/* ===== HEADER ===== */
+header {
+  position: relative; z-index: 10;
+  padding: 14px 24px;
+  display: flex; align-items: center; justify-content: space-between;
+  border-bottom: 1px solid var(--border);
+  background: rgba(7,9,15,0.9);
+  backdrop-filter: blur(20px);
+  flex-shrink: 0;
+}
+.header-left { display: flex; align-items: center; gap: 14px; }
+.app-name {
+  font-family: 'Barlow', sans-serif;
+  font-size: 15px; font-weight: 700; letter-spacing: 0.02em;
+}
+.app-name span { color: var(--live); }
+
+/* LIVE badge */
+.live-badge {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px; font-weight: 500; letter-spacing: 0.05em;
+}
+.live-badge.off {
+  background: rgba(255,255,255,0.06);
+  border: 1px solid var(--border2);
+  color: var(--text-muted);
+}
+.live-badge.on {
+  background: rgba(239,68,68,0.15);
+  border: 1px solid rgba(239,68,68,0.4);
+  color: var(--live);
+}
+.live-dot {
+  width: 6px; height: 6px;
+  border-radius: 50%; background: currentColor;
+}
+.live-badge.on .live-dot { animation: livePulse 1s ease-in-out infinite; }
+@keyframes livePulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+.header-right { display: flex; align-items: center; gap: 10px; }
+
+/* Language route */
+.lang-route {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px; color: var(--text-sub);
+  padding: 5px 12px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+/* Queue badge */
+.queue-badge {
+  display: none; align-items: center; gap: 5px;
+  padding: 5px 10px;
+  background: rgba(245,158,11,0.12);
+  border: 1px solid rgba(245,158,11,0.3);
+  border-radius: 6px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px; color: var(--queue);
+}
+.queue-badge.visible { display: flex; }
+
+.btn-settings-sm {
+  padding: 6px 12px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 7px; color: var(--text-sub);
+  font-size: 12px; font-family: 'Noto Sans JP', sans-serif;
+  cursor: pointer; transition: all 0.2s;
+}
+.btn-settings-sm:hover { background: var(--surface2); color: var(--text); }
+
+/* Source toggle button */
+.source-btn {
+  padding: 7px 13px;
+  background: var(--surface); border: 1px solid var(--border2);
+  border-radius: 8px; color: var(--text-sub);
+  font-size: 12px; font-family: 'Noto Sans JP', sans-serif;
+  cursor: pointer; transition: all 0.2s; white-space: nowrap;
+  display: flex; align-items: center; gap: 5px;
+}
+.source-btn:hover { background: var(--surface2); color: var(--text); }
+.source-btn.active-system {
+  background: rgba(59,130,246,0.12);
+  border-color: rgba(59,130,246,0.35);
+  color: #7cb9ff;
+}
+.system-info {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px; color: #3d5a7a;
+  padding: 4px 8px;
+  background: rgba(59,130,246,0.06);
+  border: 1px solid rgba(59,130,246,0.15);
+  border-radius: 6px;
+  white-space: nowrap;
+}
+.tts-toggle-label {
+  display: flex; align-items: center; gap: 5px;
+  font-size: 12px; color: var(--text-sub);
+  cursor: pointer; padding: 4px 0; white-space: nowrap;
+}
+.tts-toggle-label input[type="checkbox"] { accent-color: var(--live); cursor: pointer; }
+
+/* ===== CONTROL BAR ===== */
+.control-bar {
+  position: relative; z-index: 10;
+  padding: 12px 24px;
+  display: flex; align-items: center; gap: 12px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(7,9,15,0.7);
+  flex-shrink: 0;
+}
+
+.btn-toggle {
+  padding: 10px 28px;
+  border: none; border-radius: 10px;
+  font-size: 14px; font-weight: 700;
+  font-family: 'Barlow', sans-serif; letter-spacing: 0.04em;
+  cursor: pointer; transition: all 0.2s;
+  display: flex; align-items: center; gap: 8px;
+}
+.btn-toggle.start {
+  background: linear-gradient(135deg, #dc2626, #ef4444);
+  color: white; box-shadow: 0 4px 16px rgba(239,68,68,0.3);
+}
+.btn-toggle.stop {
+  background: rgba(239,68,68,0.1);
+  border: 1px solid rgba(239,68,68,0.3);
+  color: var(--live);
+}
+.btn-toggle:hover { filter: brightness(1.1); }
+.btn-toggle:active { transform: scale(0.97); }
+
+/* Waveform */
+.waveform {
+  display: flex; align-items: center; gap: 3px;
+  height: 24px;
+}
+.wave-bar {
+  width: 3px; border-radius: 2px;
+  background: var(--live);
+  opacity: 0.3;
+  transition: opacity 0.3s;
+}
+.waveform.active .wave-bar {
+  opacity: 1;
+  animation: wave 0.8s ease-in-out infinite;
+}
+.wave-bar:nth-child(1) { animation-delay: 0s; }
+.wave-bar:nth-child(2) { animation-delay: 0.1s; }
+.wave-bar:nth-child(3) { animation-delay: 0.2s; }
+.wave-bar:nth-child(4) { animation-delay: 0.3s; }
+.wave-bar:nth-child(5) { animation-delay: 0.15s; }
+.wave-bar:nth-child(6) { animation-delay: 0.05s; }
+.wave-bar:nth-child(7) { animation-delay: 0.25s; }
+@keyframes wave {
+  0%,100% { height: 4px; }
+  50% { height: 20px; }
+}
+
+.status-text {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px; color: var(--text-sub);
+}
+
+/* Volume */
+.vol-group {
+  margin-left: auto; display: flex; align-items: center; gap: 8px;
+}
+.vol-label { font-size: 12px; color: var(--text-sub); white-space: nowrap; }
+.vol-slider {
+  width: 80px; accent-color: var(--live);
+  cursor: pointer;
+}
+
+/* ===== SUBTITLE STAGE ===== */
+.stage {
+  position: relative; z-index: 1;
+  flex: 1;
+  display: flex; flex-direction: column;
+  justify-content: safe center; align-items: center;
+  padding: 32px 48px;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* Radial glow behind subtitles */
+.stage::before {
+  content: '';
+  position: absolute;
+  width: 600px; height: 300px;
+  background: radial-gradient(ellipse, rgba(239,68,68,0.04) 0%, transparent 70%);
+  pointer-events: none;
+}
+
+.subtitle-block {
+  width: 100%; max-width: 900px;
+  text-align: center;
+}
+
+/* Interim */
+.interim-text {
+  font-size: clamp(14px, 2vw, 18px);
+  color: var(--interim);
+  font-style: italic;
+  min-height: 28px;
+  max-height: 4.6em;
+  overflow: hidden;
+  margin-bottom: 20px;
+  transition: color 0.3s;
+  line-height: 1.5;
+}
+
+/* Translated (hero) */
+.translated-text {
+  font-size: clamp(28px, 4.5vw, 54px);
+  font-weight: 700;
+  color: var(--confirm);
+  line-height: 1.35;
+  letter-spacing: -0.01em;
+  min-height: 80px;
+  transition: opacity 0.2s;
+  word-break: break-word;
+  animation: fadeSlide 0.4s ease;
+}
+.translated-text.long  { font-size: clamp(22px, 3vw, 38px); }
+.translated-text.xlong { font-size: clamp(18px, 2.3vw, 28px); font-weight: 500; }
+@keyframes fadeSlide {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* Original source */
+.original-text {
+  margin-top: 16px;
+  font-size: clamp(12px, 1.5vw, 15px);
+  color: var(--original);
+  min-height: 22px;
+  line-height: 1.5;
+}
+
+/* Speaking indicator */
+.speaking-indicator {
+  margin-top: 14px;
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 12px;
+  background: rgba(34,211,165,0.1);
+  border: 1px solid rgba(34,211,165,0.25);
+  border-radius: 20px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px; color: var(--success);
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+.speaking-indicator.visible { opacity: 1; }
+.speak-dot { width: 5px; height: 5px; border-radius: 50%; background: currentColor; animation: livePulse 0.7s infinite; }
+
+/* ===== 待機・翻訳中エリア（右下）===== */
+.queue-preview {
+  position: absolute;
+  bottom: 20px; right: 20px;
+  max-width: 300px;
+  background: rgba(0,0,0,0.55);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 12px;
+  padding: 10px 14px;
+  opacity: 0;
+  transform: translateY(6px);
+  transition: opacity 0.3s, transform 0.3s;
+  pointer-events: none;
+}
+.queue-preview.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+.queue-preview-label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--queue);
+  margin-bottom: 5px;
+  display: flex; align-items: center; gap: 5px;
+}
+.queue-preview-label .qdot {
+  width: 5px; height: 5px; border-radius: 50%;
+  background: var(--queue);
+  animation: livePulse 0.8s infinite;
+}
+.queue-preview-text {
+  font-size: 13px;
+  color: rgba(255,255,255,0.75);
+  line-height: 1.5;
+  word-break: break-word;
+}
+.queue-preview-count {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+/* Empty state */
+.empty-state {
+  position: absolute;
+  display: flex; flex-direction: column; align-items: center; gap: 12px;
+  color: var(--text-muted);
+  transition: opacity 0.4s;
+  pointer-events: none;
+}
+.empty-state.hidden { opacity: 0; }
+.empty-icon { font-size: 40px; opacity: 0.3; }
+.empty-text { font-size: 14px; line-height: 1.6; text-align: center; }
+
+/* ===== HISTORY ===== */
+.history-section {
+  position: relative; z-index: 10;
+  flex-shrink: 0;
+  border-top: 1px solid var(--border);
+  background: rgba(7,9,15,0.8);
+  backdrop-filter: blur(10px);
+}
+.history-header {
+  padding: 10px 24px;
+  display: flex; align-items: center; justify-content: space-between;
+  border-bottom: 1px solid var(--border);
+}
+.history-title {
+  font-size: 12px; font-weight: 600; color: var(--text-sub);
+  display: flex; align-items: center; gap: 8px;
+}
+.history-count {
+  font-family: 'JetBrains Mono', monospace; font-size: 11px;
+  padding: 2px 6px;
+  background: var(--surface); border-radius: 4px; color: var(--text-muted);
+}
+.btn-clear-hist {
+  font-size: 12px; padding: 4px 10px;
+  background: transparent; border: 1px solid var(--border);
+  border-radius: 5px; color: var(--text-muted);
+  font-family: 'Noto Sans JP', sans-serif; cursor: pointer; transition: all 0.2s;
+}
+.btn-clear-hist:hover { border-color: var(--border2); color: var(--text-sub); }
+
+.history-body {
+  height: 140px; overflow-y: auto;
+  padding: 8px 24px; display: flex; flex-direction: column; gap: 6px;
+}
+.hist-empty { color: var(--text-muted); font-size: 12px; text-align: center; padding: 16px; }
+
+.hist-entry {
+  display: flex; gap: 12px; align-items: flex-start;
+  padding: 8px 12px;
+  background: var(--surface);
+  border-radius: 8px;
+  border-left: 2px solid var(--live);
+  animation: fadeIn 0.3s ease;
+}
+@keyframes fadeIn { from{opacity:0;transform:translateY(4px)} to{opacity:1;transform:none} }
+
+.hist-time {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px; color: var(--text-muted);
+  white-space: nowrap; padding-top: 2px;
+}
+.hist-content { flex: 1; min-width: 0; }
+.hist-translated { font-size: 13px; color: var(--text); line-height: 1.5; }
+.hist-original { font-size: 11px; color: var(--text-sub); margin-top: 2px; }
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 3px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 2px; }
+
+/* ===== モバイル（iPhone）モード ===== */
+body.mobile header { padding: 8px 12px; flex-wrap: wrap; gap: 6px; }
+body.mobile .header-right { gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+body.mobile .lang-route, body.mobile #modeBadge { display: none; }
+body.mobile .control-bar { padding: 8px 12px; flex-wrap: wrap; gap: 8px; }
+body.mobile #sourceToggleBtn, body.mobile #systemAudioInfo, body.mobile #micSelect, body.mobile .waveform { display: none !important; }
+body.mobile #diagText { width: 100%; order: 10; font-size: 10px !important; }
+body.mobile .vol-group { margin-left: 0; width: 100%; order: 11; }
+body.mobile .vol-slider { flex: 1; width: auto; }
+body.mobile .btn-toggle { padding: 12px 22px; font-size: 16px; }
+body.mobile .stage { padding: 14px 14px; }
+body.mobile .translated-text { font-size: clamp(20px, 6.2vw, 30px); }
+body.mobile .translated-text.long  { font-size: clamp(18px, 5.4vw, 26px); }
+body.mobile .translated-text.xlong { font-size: clamp(16px, 4.8vw, 22px); }
+body.mobile .interim-text { font-size: 13px; margin-bottom: 10px; }
+body.mobile .original-text { font-size: 12px; }
+body.mobile .history-body { height: 22vh; padding: 6px 12px; }
+body.mobile .history-header { padding: 6px 12px; }
+body.mobile .queue-preview { left: 12px; right: 12px; bottom: 10px; max-width: none; }
+body.mobile .modal { padding: 22px 18px; width: 96%; }
+body.mobile .field-row { grid-template-columns: 1fr; }
+body.mobile .field input, body.mobile .field select { font-size: 16px; } /* iOS の自動ズーム防止 */
+.ui-mode-btn { white-space: nowrap; }
+
+@media (max-width: 600px) {
+  header { padding: 10px 14px; }
+  .control-bar { padding: 10px 14px; flex-wrap: wrap; }
+  .stage { padding: 20px 20px; }
+  .history-body { padding: 8px 14px; }
+  .history-header { padding: 8px 14px; }
+  .lang-route { display: none; }
+  .vol-group { margin-left: 0; }
+}
+</style>
+</head>
+<body>
+
+<!-- ===== SETTINGS MODAL ===== -->
+<div class="modal-overlay" id="settingsModal">
+  <div class="modal">
+    <div class="modal-title">🎙 登壇翻訳 LIVE — 設定</div>
+    <div class="modal-sub">Speech で音声を文字にし、Foundry の LLM で自然な日本語に訳します。同じフォルダに <code>live-translator.config.js</code> があれば、その値を自動で読み込みます。ここでの変更はこのタブを閉じるまで有効です。</div>
+
+    <div class="field">
+      <label>翻訳エンジン</label>
+      <select id="engine" onchange="updateEngineFields()">
+        <option value="llm" selected>LLM（自然な訳・推奨・低コスト）</option>
+        <option value="nmt">Speech 翻訳（従来方式・保険）</option>
+      </select>
+      <div class="field-note">LLM：音声認識のみ＋gpt で翻訳。Speech 翻訳：従来どおり直訳寄りだが、LLM が不調なときの保険。</div>
+    </div>
+
+    <div class="section-title">① Azure Speech（音声認識）</div>
+    <div class="field">
+      <label>Azure Speech リソースキー（STT / 翻訳 / TTS 共通）</label>
+      <input type="password" id="speechKey" placeholder="xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx">
+    </div>
+    <div class="field">
+      <label>Azure Speech リージョン</label>
+      <input type="text" id="speechRegion" placeholder="eastus" value="eastus">
+    </div>
+
+    <label class="tts-toggle-label" style="margin:-4px 0 6px;">
+      <input type="checkbox" id="rememberKeys"> この端末にキーと設定を保存（次回から入力不要）
+    </label>
+    <div class="field-note" style="margin:0 0 4px;">iPhone など設定ファイルを置けない端末向け。チェックを外して保存すると、保存したキーを消去します。</div>
+
+    <div id="llmFields">
+      <div class="section-title">② Foundry（LLM 翻訳）</div>
+      <div class="field">
+        <label>エンドポイント</label>
+        <input type="text" id="aoaiEndpoint" placeholder="https://foundry-livetrans-eus2-ygl.openai.azure.com">
+        <div class="field-note">リソース名だけでも可（例: foundry-livetrans-eus2-ygl）</div>
+      </div>
+      <div class="field">
+        <label>Foundry キー</label>
+        <input type="password" id="aoaiKey" placeholder="xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx">
+      </div>
+      <div class="field-row">
+        <div class="field">
+          <label>デプロイ名</label>
+          <input type="text" id="aoaiDeployment" placeholder="gpt-5.4-mini" value="gpt-5.4-mini">
+        </div>
+        <div class="field">
+          <label>推論の強さ</label>
+          <select id="reasoningEffort">
+            <option value="none" selected>なし（最速）</option>
+            <option value="low">低</option>
+          </select>
+        </div>
+      </div>
+      <div class="field-row">
+        <div class="field">
+          <label>訳の口調</label>
+          <select id="tone">
+            <option value="polite" selected>です・ます調</option>
+            <option value="plain">だ・である調</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>文脈として渡す直前の文</label>
+          <select id="ctxCount">
+            <option value="0">0（最安）</option>
+            <option value="2">2文</option>
+            <option value="3" selected>3文</option>
+            <option value="5">5文</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <div class="section-title">③ 運用</div>
+    <div class="field-row">
+      <div class="field">
+        <label>無音で待機（課金停止）</label>
+        <select id="autoStopMin">
+          <option value="0">しない</option>
+          <option value="2">2分</option>
+          <option value="3" selected>3分</option>
+          <option value="5">5分</option>
+          <option value="10">10分</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>費用の警告（円）</label>
+        <input type="number" id="budgetWarn" value="15000" min="0" step="1000">
+      </div>
+    </div>
+    <div class="field-row">
+      <div class="field">
+        <label>声で自動再開の感度</label>
+        <select id="resumeSens">
+          <option value="high">高（小さな声でも再開）</option>
+          <option value="mid" selected>中</option>
+          <option value="low">低（会場が騒がしい時）</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>待機の上限（超えたら停止）</label>
+        <select id="standbyMaxMin">
+          <option value="15">15分</option>
+          <option value="30" selected>30分</option>
+          <option value="60">60分</option>
+          <option value="0">無制限</option>
+        </select>
+      </div>
+    </div>
+    <div class="field-note" style="margin:-6px 0 12px;">無音が続くと Speech を切断して待機し、声を検出すると直前2秒分の音声ごと自動で再開します。音量バーの白線が再開のしきい値です。</div>
+
+    <div class="field-row">
+      <div class="field">
+        <label>登壇者の言語（入力）</label>
+        <select id="srcLang">
+          <option value="en-US">🇺🇸 English</option>
+          <option value="ja-JP">🇯🇵 日本語</option>
+          <option value="zh-CN">🇨🇳 中文(简体)</option>
+          <option value="ko-KR">🇰🇷 한국어</option>
+          <option value="fr-FR">🇫🇷 Français</option>
+          <option value="es-ES">🇪🇸 Español</option>
+          <option value="de-DE">🇩🇪 Deutsch</option>
+          <option value="it-IT">🇮🇹 Italiano</option>
+          <option value="pt-BR">🇧🇷 Português</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>聴衆の言語（出力）</label>
+        <select id="tgtLang">
+          <option value="ja-JP" selected>🇯🇵 日本語</option>
+          <option value="en-US">🇺🇸 English</option>
+          <option value="zh-CN">🇨🇳 中文(简体)</option>
+          <option value="ko-KR">🇰🇷 한국어</option>
+          <option value="fr-FR">🇫🇷 Français</option>
+          <option value="es-ES">🇪🇸 Español</option>
+          <option value="de-DE">🇩🇪 Deutsch</option>
+          <option value="it-IT">🇮🇹 Italiano</option>
+          <option value="pt-BR">🇧🇷 Português</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="field-row">
+      <div class="field">
+        <label>🔊 TTSエンジン</label>
+        <select id="ttsEngine">
+          <option value="browser">ブラウザ内蔵（低遅延）</option>
+          <option value="azure">Azure Neural（高品質）</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>⏱ セグメンテーション</label>
+        <select id="segMode">
+          <option value="meeting">会議モード（800ms）</option>
+          <option value="standard" selected>標準（1200ms）</option>
+          <option value="presentation">登壇モード（2000ms）</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="hint-box">
+      🎧 <strong>マイク入力</strong>：ヘッドセット推奨。TTS音声をマイクが拾うとフィードバックが発生します。<br>
+      🖥 <strong>システム音声</strong>：YouTube・Teamsなどの音声を翻訳。画面共有で「音声を共有」を有効にしてください。<br>
+      ⚡ <strong>ブラウザ内蔵TTS</strong>はネットワーク不要で即時再生。<strong>Azure Neural</strong>は高品質だが0.5〜1秒の遅延があります。
+    </div>
+
+    <div class="field">
+      <label>📌 用語集（認識ヒント＋英語のまま残す語）</label>
+      <textarea id="phraseHints"
+        placeholder="1行に1語（Power Platform 系の主要製品名は登録済み）&#10;登壇者名・セッション固有の用語を追加&#10;例: Managed Environments"
+        style="width:100%;height:72px;padding:10px 13px;
+               background:rgba(255,255,255,0.04);
+               border:1px solid rgba(255,255,255,0.08);
+               border-radius:9px;color:#f0f4ff;font-size:13px;
+               font-family:'Noto Sans JP',sans-serif;
+               outline:none;resize:vertical;line-height:1.6;"></textarea>
+      <div style="font-size:11px;color:#4a5568;margin-top:5px;">
+        音声認識のヒントになり、LLM 翻訳では英語のまま残します（最大500語）
+      </div>
+    </div>
+
+    <button class="btn-start-modal" onclick="saveSettings()">保存して開始 →</button>
+  </div>
+</div>
+
+<!-- ===== HEADER ===== -->
+<header>
+  <div class="header-left">
+    <div class="app-name">登壇翻訳 <span>LIVE</span></div>
+    <div class="live-badge off" id="liveBadge">
+      <div class="live-dot"></div>
+      <span id="liveBadgeText">STANDBY</span>
+    </div>
+  </div>
+  <div class="header-right">
+    <div class="lang-route" id="langRoute">EN → JA</div>
+    <div class="queue-badge" id="queueBadge">⏳ <span id="queueNum">0</span> 待機</div>
+    <div class="cost-badge" id="costBadge" title="概算費用（今回 / 累計）。累計はこのブラウザに保存。クリックでリセット" onclick="resetCostTotal()" style="cursor:pointer">💴 ¥0 / 累計 ¥0</div>
+    <div id="modeBadge" style="
+      font-family:'JetBrains Mono',monospace; font-size:10px;
+      padding:3px 8px; border-radius:4px;
+      background:rgba(99,102,241,0.12); border:1px solid rgba(99,102,241,0.25);
+      color:#818cf8; white-space:nowrap;
+    ">標準</div>
+    <button class="btn-settings-sm ui-mode-btn" id="uiModeBtn" onclick="toggleUiMode()" title="PC版 / iPhone版 を切り替え">🖥 PC版</button>
+    <button class="btn-settings-sm" onclick="openSettings()">⚙ 設定</button>
+  </div>
+</header>
+
+<!-- ===== CONTROL BAR ===== -->
+<div class="control-bar">
+  <button class="btn-toggle start" id="mainBtn" onclick="toggleLive()">
+    ▶ 開始
+  </button>
+
+  <!-- 音声ソース切り替えボタン -->
+  <button class="source-btn" id="sourceToggleBtn" onclick="toggleSource()" title="入力ソースを切り替え">
+    🎤 マイク
+  </button>
+
+  <!-- マイクモード時: デバイス選択 -->
+  <select id="micSelect" title="使用するマイクを選択" style="
+    padding: 7px 10px;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.13);
+    border-radius: 8px;
+    color: #f0f4ff;
+    font-size: 12px;
+    font-family: 'Noto Sans JP', sans-serif;
+    cursor: pointer; outline: none; max-width: 180px;
+  ">
+    <option value="">🎤 デフォルト</option>
+  </select>
+
+  <!-- システム音声モード時: 案内テキスト -->
+  <span class="system-info" id="systemAudioInfo" style="display:none;">
+    🖥 画面共有ダイアログで「音声を共有」を選択
+  </span>
+
+  <!-- TTS（翻訳音声）トグル -->
+  <label class="tts-toggle-label" id="ttsToggleLabel" title="翻訳音声の読み上げON/OFF">
+    <input type="checkbox" id="ttsToggle" checked onchange="onTtsToggle(this)">
+    翻訳音声
+  </label>
+
+  <div class="waveform" id="waveform">
+    <div class="wave-bar" style="height:6px"></div>
+    <div class="wave-bar" style="height:10px"></div>
+    <div class="wave-bar" style="height:14px"></div>
+    <div class="wave-bar" style="height:18px"></div>
+    <div class="wave-bar" style="height:12px"></div>
+    <div class="wave-bar" style="height:8px"></div>
+    <div class="wave-bar" style="height:16px"></div>
+  </div>
+  <div class="status-text" id="statusText">待機中</div>
+  <div id="levelWrap" title="入力音量。白い線は待機からの再開しきい値（これを超え続けると再開）" style="position:relative;width:70px;height:6px;border-radius:3px;background:rgba(255,255,255,0.08);overflow:hidden;">
+    <div id="levelBar" style="height:100%;width:0%;background:var(--success);transition:width 80ms linear;"></div>
+    <div id="levelMark" style="position:absolute;top:0;bottom:0;left:42%;width:2px;background:rgba(255,255,255,0.55);"></div>
+  </div>
+  <div class="status-text" id="diagText" style="color:#4a5568;font-size:11px;"></div>
+  <div class="vol-group">
+    <span class="vol-label" title="読み上げ速度（次の文から反映）">🗣 速度</span>
+    <input type="range" class="vol-slider" id="rateSlider" min="0.7" max="2" step="0.1" value="1.1" title="読み上げ速度（次の文から反映）">
+    <span class="vol-label" id="rateLabel" style="font-family:'JetBrains Mono',monospace;min-width:34px;">1.1x</span>
+    <span class="vol-label">🔊 音量</span>
+    <input type="range" class="vol-slider" id="volSlider" min="0" max="1" step="0.05" value="1">
+  </div>
+</div>
+
+<!-- ===== SUBTITLE STAGE ===== -->
+<div class="stage">
+  <div class="empty-state" id="emptyState">
+    <div class="empty-icon" id="emptyIcon">🎙</div>
+    <div class="empty-text" id="emptyText">「開始」を押すと登壇者の音声を<br>リアルタイムで翻訳・読み上げします</div>
+  </div>
+
+  <div class="subtitle-block">
+    <div class="interim-text" id="interimText"></div>
+    <div class="translated-text" id="translatedText"></div>
+    <div class="original-text" id="originalText"></div>
+    <div class="speaking-indicator" id="speakingIndicator">
+      <div class="speak-dot"></div> 読み上げ中
+    </div>
+  </div>
+
+  <!-- 待機・翻訳中エリア（右下） -->
+  <div class="queue-preview" id="queuePreview">
+    <div class="queue-preview-label">
+      <div class="qdot"></div>
+      <span id="queuePreviewLabel">翻訳中</span>
+    </div>
+    <div class="queue-preview-text" id="queuePreviewText"></div>
+    <div class="queue-preview-count" id="queuePreviewCount"></div>
+  </div>
+</div>
+
+<!-- ===== HISTORY ===== -->
+<div class="history-section">
+  <div class="history-header">
+    <div class="history-title">
+      📋 字幕ログ
+      <span class="history-count" id="histCount">0</span>
+    </div>
+    <div style="display:flex;gap:6px">
+      <button class="btn-clear-hist" onclick="downloadCSV()">CSV出力</button>
+      <button class="btn-clear-hist" onclick="clearHistory()">クリア</button>
+    </div>
+  </div>
+  <div class="history-body" id="histBody">
+    <div class="hist-empty">翻訳が確定すると、ここに字幕ログが表示されます</div>
+  </div>
+</div>
+
+<!-- 同じフォルダの設定ファイル（なければ無視されます） -->
+<script src="live-translator.config.js" onerror="window.LT_CONFIG_MISSING = true"></script>
+<script>
+// ===== 保存領域（使えない環境ではメモリ上で代替し、起動を止めない）=====
+function safeStorage(kind) {
+  try {
+    const st = window[kind];
+    st.setItem('__lt_probe', '1'); st.removeItem('__lt_probe');
+    return st;
+  } catch (_) {
+    const m = new Map();
+    return {
+      getItem: k => (m.has(k) ? m.get(k) : null),
+      setItem: (k, v) => { m.set(k, String(v)); },
+      removeItem: k => { m.delete(k); },
+    };
+  }
+}
+const SS = safeStorage('sessionStorage');
+const LS = safeStorage('localStorage');
+
+// ===== 言語設定 =====
+const LANGS = {
+  'ja-JP': { name: '日本語',   voice: 'ja-JP-NanamiNeural',    tc: 'ja'      },
+  'en-US': { name: 'English',  voice: 'en-US-JennyNeural',     tc: 'en'      },
+  'zh-CN': { name: '中文',     voice: 'zh-CN-XiaoxiaoNeural',  tc: 'zh-Hans' },
+  'ko-KR': { name: '한국어',   voice: 'ko-KR-SunHiNeural',     tc: 'ko'      },
+  'fr-FR': { name: 'Français', voice: 'fr-FR-DeniseNeural',    tc: 'fr'      },
+  'es-ES': { name: 'Español',  voice: 'es-ES-ElviraNeural',    tc: 'es'      },
+  'de-DE': { name: 'Deutsch',  voice: 'de-DE-KatjaNeural',     tc: 'de'      },
+  'it-IT': { name: 'Italiano', voice: 'it-IT-ElsaNeural',      tc: 'it'      },
+  'pt-BR': { name: 'Português',voice: 'pt-BR-FranciscaNeural', tc: 'pt'      },
+};
+
+// ===== State =====
+const DEFAULT_CFG = {
+  engine:       'llm',       // 'llm'(STT + LLM翻訳) | 'nmt'(Speech翻訳・従来)
+  speechKey:    '',
+  speechRegion: 'eastus',
+  srcLang:      'en-US',
+  tgtLang:      'ja-JP',
+  ttsEngine:    'browser',   // 'browser' | 'azure'
+  segMode:      'standard',  // 'meeting'(800ms) | 'standard'(1200ms) | 'presentation'(2000ms)
+  aoaiEndpoint: '',
+  aoaiKey:      '',
+  aoaiDeployment: 'gpt-5.4-mini',
+  reasoningEffort: 'none',   // 'none' | 'low'（none 非対応なら自動で low に切替）
+  tone:         'polite',
+  ctxCount:     3,
+  autoStopMin:  3,          // 無音でこの分数が続いたら待機（Speech 切断・課金停止）
+  resumeSens:   'mid',      // 待機からの再開の感度 'high' | 'mid' | 'low'
+  standbyMaxMin: 30,        // 待機がこの分数続いたら完全停止（0 で無制限）
+  budgetWarn:   15000,
+};
+let cfg = { ...DEFAULT_CFG };
+
+// ===== 費用の概算（2026-10 時点の単価・為替。正確な金額は Azure Cost Management で確認）=====
+const PRICE = {
+  sttPerHourUsd:   1.00,   // Speech 音声認識（リアルタイム）$1/時 ※非公式比較サイトの値
+  nmtPerHourUsd:   2.50,   // Speech 翻訳 $2.50/時 ※Learn の計算例
+  llmInPerMUsd:    0.75,   // gpt-5.4-mini 入力 $/100万トークン ※非公式比較サイトの値
+  llmOutPerMUsd:   4.50,   // gpt-5.4-mini 出力 $/100万トークン（推論トークン含む）
+  nmtCharPerMUsd: 10.00,   // Translator（フォールバック）$/100万文字
+  jpyPerUsd:       160,
+};
+
+// Power Platform カンファレンス向けの既定用語（英語のまま残す・認識ヒントにも使う）
+const DEFAULT_TERMS = [
+  'Power Platform', 'Power Apps', 'Power Automate', 'Power BI', 'Power Pages', 'Power Fx',
+  'Copilot Studio', 'Microsoft Copilot', 'Microsoft 365 Copilot', 'Copilot', 'Dataverse',
+  'Microsoft Fabric', 'Azure', 'Azure OpenAI', 'Microsoft Foundry', 'Dynamics 365',
+  'SharePoint', 'Microsoft Teams', 'Microsoft Entra', 'Managed Environments',
+  'MCP', 'ALM', 'DLP', 'CoE Starter Kit',
+];
+const SEG_MS = { meeting: '800', standard: '1200', presentation: '2000' };
+const MODE_LABEL = { meeting: '会議', standard: '標準', presentation: '登壇' };
+
+let recognizer = null;
+let isLive = false;
+let ttsQueue = [];
+let ttsPlaying = false;
+let histCount = 0;
+let currentVolume = 1.0;
+let currentAudio = null;
+let translationChain = Promise.resolve();
+let selectedMicId = '';
+let histData = [];
+
+// LLM 翻訳・費用・自動停止
+let srcHistory = [];          // 直前の発話（文脈用）
+let liveStartedAt = 0;        // 今回の LIVE 開始時刻（ms）
+let lastSpeechAt = 0;         // 最後に音声を検出した時刻（ms）
+let watchdogTimer = null;     // 自動停止・費用表示の定期処理
+let wakeLock = null;
+let sessionCost = { audioSec: 0, inTok: 0, outTok: 0, nmtChars: 0 };
+let costTotalYen = loadCostTotal(); // 過去セッションの累計（localStorage）
+let costTotalAtStart = 0;
+let effortFallbackNotified = false;
+let lv = null;                // 1回の LIVE の音声・接続状態
+let isStandby = false;        // 待機中（Speech 切断・音量監視のみ）
+let standbySince = 0;
+let liveSessionId = 0;         // 停止後に遅れて届いた翻訳を捨てるための世代番号
+
+// ===== 音声ソース管理 =====
+let audioSource = 'mic'; // 'mic' | 'system'
+let ttsEnabled  = true;
+
+// ===== マイクデバイス一覧を取得してセレクターを更新 =====
+async function loadMicDevices() {
+  try {
+    const tmp = await navigator.mediaDevices.getUserMedia({ audio: true });
+    tmp.getTracks().forEach(t => t.stop());
+
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const mics = devices.filter(d => d.kind === 'audioinput');
+    const sel = document.getElementById('micSelect');
+    sel.innerHTML = '<option value="">🎤 デフォルト</option>';
+    mics.forEach((d, i) => {
+      const opt = document.createElement('option');
+      opt.value = d.deviceId;
+      opt.textContent = d.label || `マイク ${i + 1}`;
+      sel.appendChild(opt);
+    });
+  } catch (e) {
+    console.warn('マイク一覧取得に失敗:', e);
+  }
+}
+
+document.getElementById('micSelect').addEventListener('change', e => {
+  selectedMicId = e.target.value;
+});
+
+// ===== 音声ソース切り替え =====
+function toggleSource() {
+  if (isLive) stopLive();
+  audioSource = (audioSource === 'mic') ? 'system' : 'mic';
+  updateSourceUI();
+}
+
+function updateSourceUI() {
+  const isSys = (audioSource === 'system');
+  const btn   = document.getElementById('sourceToggleBtn');
+  btn.textContent = isSys ? '🖥 システム音声' : '🎤 マイク';
+  btn.classList.toggle('active-system', isSys);
+  document.getElementById('micSelect').style.display     = isSys ? 'none'  : '';
+  document.getElementById('systemAudioInfo').style.display = isSys ? ''    : 'none';
+
+  // TTS: マイクモードはON、システム音声モードはデフォルトOFF（ループバック防止）
+  const ttsCheck = document.getElementById('ttsToggle');
+  if (isSys) {
+    ttsCheck.checked = false;
+    ttsEnabled = false;
+  } else {
+    ttsCheck.checked = true;
+    ttsEnabled = true;
+  }
+
+  // emptyState のアイコン・テキスト更新
+  document.getElementById('emptyIcon').textContent = isSys ? '🖥' : '🎙';
+  document.getElementById('emptyText').innerHTML = isSys
+    ? '「開始」を押すと画面共有ダイアログが開きます<br>「音声を共有」を有効にして共有元を選択してください'
+    : '「開始」を押すと登壇者の音声を<br>リアルタイムで翻訳・読み上げします';
+}
+
+// ===== PC版 / iPhone版 の切り替え =====
+// 既定は端末から自動判定。ヘッダーのボタン、または URL の ?mode=mobile / ?mode=pc で切り替え（端末に記憶）
+function isIOSDevice() {
+  return /iPhone|iPad|iPod/.test(navigator.userAgent)
+      || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+}
+function getUiMode() {
+  try {
+    const q = new URLSearchParams(location.search).get('mode');
+    if (q === 'mobile' || q === 'pc') { LS.setItem('lvUiMode', q); return q; }
+    const v = LS.getItem('lvUiMode');
+    if (v === 'mobile' || v === 'pc') return v;
+  } catch (_) {}
+  return (isIOSDevice() || /Android|Mobi/.test(navigator.userAgent)) ? 'mobile' : 'pc';
+}
+let uiMode = 'pc';
+function applyUiMode(mode) {
+  uiMode = mode;
+  const mobile = mode === 'mobile';
+  document.body.classList.toggle('mobile', mobile);
+  document.getElementById('uiModeBtn').textContent = mobile ? '📱 iPhone版' : '🖥 PC版';
+  // iPhone はシステム音声（画面共有）に非対応 → マイク固定
+  if (mobile && audioSource !== 'mic') { audioSource = 'mic'; }
+  updateSourceUI();
+  if (mobile) {
+    // スピーカーで読み上げるとマイクが拾ってしまうため、既定は読み上げOFF（イヤホン使用時にON）
+    const cb = document.getElementById('ttsToggle');
+    cb.checked = false; ttsEnabled = false;
+    document.getElementById('emptyText').innerHTML =
+      '「開始」を押すとマイクで登壇者の声を拾って翻訳します<br>読み上げはイヤホン使用時のみONにしてください';
+  }
+}
+function toggleUiMode() {
+  if (isLive) stopLive();
+  const next = uiMode === 'mobile' ? 'pc' : 'mobile';
+  try { LS.setItem('lvUiMode', next); } catch (_) {}
+  applyUiMode(next);
+}
+
+function onTtsToggle(cb) {
+  ttsEnabled = cb.checked;
+}
+
+// ===== フレーズヒスト管理 =====
+function getUserTerms() {
+  const raw = SS.getItem('lvPhrases') || '';
+  return raw.split('\n').map(s => s.trim()).filter(s => s.length > 0);
+}
+function getPhraseList() {
+  // 既定の製品名 + ユーザー追加分（重複除去）
+  return [...new Set([...DEFAULT_TERMS, ...getUserTerms()])].slice(0, 500);
+}
+
+// ===== Settings =====
+const val = id => document.getElementById(id).value.trim();
+
+function updateEngineFields() {
+  const isLlm = document.getElementById('engine').value === 'llm';
+  document.getElementById('llmFields').style.display = isLlm ? '' : 'none';
+}
+
+// "foundry-xxx" / "https://foundry-xxx.openai.azure.com/..." どちらでも受け付けて正規化
+function normalizeEndpoint(v) {
+  v = (v || '').trim().replace(/\/+$/, '');
+  if (!v) return '';
+  if (!/^https?:\/\//i.test(v)) v = `https://${v}.openai.azure.com`;
+  return v.replace(/\/openai(\/v1)?(\/.*)?$/i, '');
+}
+
+function saveSettings() {
+  const next = {
+    engine:          val('engine'),
+    speechKey:       val('speechKey'),
+    speechRegion:    val('speechRegion'),
+    srcLang:         val('srcLang'),
+    tgtLang:         val('tgtLang'),
+    ttsEngine:       val('ttsEngine'),
+    segMode:         val('segMode'),
+    aoaiEndpoint:    normalizeEndpoint(val('aoaiEndpoint')),
+    aoaiKey:         val('aoaiKey'),
+    aoaiDeployment:  val('aoaiDeployment') || 'gpt-5.4-mini',
+    reasoningEffort: val('reasoningEffort'),
+    tone:            val('tone'),
+    ctxCount:        parseInt(val('ctxCount'), 10) || 0,
+    autoStopMin:     parseInt(val('autoStopMin'), 10) || 0,
+    resumeSens:      val('resumeSens'),
+    standbyMaxMin:   parseInt(val('standbyMaxMin'), 10) || 0,
+    budgetWarn:      parseInt(val('budgetWarn'), 10) || 0,
+  };
+  if (!next.speechKey || !next.speechRegion) { alert('Speech キーとリージョンを入力してください'); return; }
+  if (next.engine === 'llm' && (!next.aoaiEndpoint || !next.aoaiKey)) {
+    alert('LLM 翻訳には Foundry のエンドポイントとキーが必要です'); return;
+  }
+  cfg = next;
+  effortFallbackNotified = false;
+  SS.setItem('lvCfg', JSON.stringify(cfg));
+  SS.setItem('lvPhrases', document.getElementById('phraseHints').value);
+  try {
+    if (document.getElementById('rememberKeys').checked) {
+      LS.setItem('lvSavedCfg', JSON.stringify(cfg));
+      LS.setItem('lvSavedPhrases', document.getElementById('phraseHints').value);
+    } else {
+      LS.removeItem('lvSavedCfg');
+      LS.removeItem('lvSavedPhrases');
+    }
+  } catch (_) {}
+  document.getElementById('settingsModal').style.display = 'none';
+  updateLangRoute();
+  updateLevelMark();
+  loadMicDevices();
+}
+
+function openSettings() {
+  if (isLive) stopLive();
+  const set = (id, v) => { document.getElementById(id).value = v; };
+  set('engine',          cfg.engine);
+  set('speechKey',       cfg.speechKey);
+  set('speechRegion',    cfg.speechRegion);
+  set('srcLang',         cfg.srcLang);
+  set('tgtLang',         cfg.tgtLang);
+  set('ttsEngine',       cfg.ttsEngine);
+  set('segMode',         cfg.segMode);
+  set('aoaiEndpoint',    cfg.aoaiEndpoint);
+  set('aoaiKey',         cfg.aoaiKey);
+  set('aoaiDeployment',  cfg.aoaiDeployment);
+  set('reasoningEffort', cfg.reasoningEffort);
+  set('tone',            cfg.tone);
+  set('ctxCount',        String(cfg.ctxCount));
+  set('autoStopMin',     String(cfg.autoStopMin));
+  set('resumeSens',      cfg.resumeSens);
+  set('standbyMaxMin',   String(cfg.standbyMaxMin));
+  set('budgetWarn',      cfg.budgetWarn);
+  set('phraseHints',     SS.getItem('lvPhrases') || '');
+  let remembered = false;
+  try { remembered = !!LS.getItem('lvSavedCfg'); } catch (_) {}
+  document.getElementById('rememberKeys').checked = remembered;
+  updateEngineFields();
+  document.getElementById('settingsModal').style.display = 'flex';
+}
+
+function updateLangRoute() {
+  const s = LANGS[cfg.srcLang]?.name || cfg.srcLang;
+  const t = LANGS[cfg.tgtLang]?.name || cfg.tgtLang;
+  document.getElementById('langRoute').textContent = `${s} → ${t}`;
+  const eng = cfg.engine === 'llm' ? 'LLM' : 'Speech翻訳';
+  document.getElementById('modeBadge').textContent = `${eng}・${MODE_LABEL[cfg.segMode] || '標準'}`;
+}
+
+// 設定ファイル（live-translator.config.js）の値を読み取る
+function readConfigFile() {
+  const f = window.LT_CONFIG;
+  if (!f || typeof f !== 'object') return {};
+  const out = {};
+  for (const k of Object.keys(DEFAULT_CFG)) {
+    if (f[k] !== undefined && f[k] !== null && f[k] !== '') out[k] = f[k];
+  }
+  if (out.aoaiEndpoint) out.aoaiEndpoint = normalizeEndpoint(out.aoaiEndpoint);
+  // 未記入のテンプレート値（<...>）は無視
+  for (const k of ['speechKey', 'aoaiKey']) if (/^<.*>$/.test(String(out[k] || ''))) delete out[k];
+  return out;
+}
+
+function isReady(c) {
+  return !!(c.speechKey && c.speechRegion && (c.engine !== 'llm' || (c.aoaiEndpoint && c.aoaiKey)));
+}
+
+(function restore() {
+  const fromFile = readConfigFile();
+  let saved = null, persisted = null;
+  try { saved = JSON.parse(SS.getItem('lvCfg') || 'null'); } catch (_) {}
+  try { persisted = JSON.parse(LS.getItem('lvSavedCfg') || 'null'); } catch (_) {}
+  if (persisted && SS.getItem('lvPhrases') === null) {
+    try { SS.setItem('lvPhrases', LS.getItem('lvSavedPhrases') || ''); } catch (_) {}
+  }
+
+  // 優先順位: 既定値 < 設定ファイル < この端末に保存した値 < このタブで設定画面から変更した値
+  cfg = { ...DEFAULT_CFG, ...fromFile, ...(persisted || {}), ...(saved || {}) };
+
+  // 用語集: このタブで未設定なら設定ファイルの terms を使う
+  if (SS.getItem('lvPhrases') === null && Array.isArray(window.LT_CONFIG?.terms)) {
+    SS.setItem('lvPhrases', window.LT_CONFIG.terms.join('\n'));
+  }
+
+  if (isReady(cfg)) {
+    document.getElementById('settingsModal').style.display = 'none';
+    updateLangRoute();
+    loadMicDevices();
+    if (!saved) {
+      if (persisted) setStatus('この端末に保存した設定を読み込みました');
+      else if (Object.keys(fromFile).length) setStatus('設定ファイルを読み込みました');
+    }
+  } else if (Object.keys(fromFile).length) {
+    // ファイルはあるがキーが未記入 → 設定画面に読み込んだ値を入れて表示
+    openSettings();
+  }
+  updateEngineFields();
+  renderCost();
+  applyUiMode(getUiMode());
+})();
+
+document.getElementById('volSlider').addEventListener('input', e => {
+  currentVolume = parseFloat(e.target.value);
+});
+
+// ===== 読み上げ速度（0.7〜2.0倍。Azure TTS の上限が 2 倍のため）=====
+const RATE_MIN = 0.7, RATE_MAX = 2.0;
+const clampRate = r => Math.min(RATE_MAX, Math.max(RATE_MIN, Math.round((parseFloat(r) || 1.1) * 10) / 10));
+let currentRate = (() => {
+  // 優先順位: このブラウザで前回選んだ値 > 設定ファイルの ttsRate > 既定 1.1
+  try { const v = LS.getItem('lvTtsRate'); if (v) return clampRate(v); } catch (_) {}
+  return clampRate(window.LT_CONFIG?.ttsRate ?? 1.1);
+})();
+function setRate(r) {
+  currentRate = clampRate(r);
+  document.getElementById('rateSlider').value = currentRate;
+  document.getElementById('rateLabel').textContent = currentRate.toFixed(1) + 'x';
+  try { LS.setItem('lvTtsRate', String(currentRate)); } catch (_) {}
+}
+document.getElementById('rateSlider').addEventListener('input', e => setRate(e.target.value));
+setRate(currentRate);
+
+// ===== Toggle =====
+async function toggleLive() {
+  if (!cfg.speechKey) { openSettings(); return; }
+  isLive ? stopLive() : await startLive();
+}
+
+// ===== Start Continuous Recognition =====
+// iOS Safari は「ボタンを押した瞬間」でないと音声を有効にできないため、
+// 最初の await より前に AudioContext 作成と読み上げのロック解除を行う
+async function startLive() {
+  const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  audioCtx.resume().catch(() => {});
+  unlockTtsForGesture();
+  let used = false;
+  try { used = await startLiveInner(audioCtx); }
+  finally { if (!used) { try { audioCtx.close(); } catch (_) {} } }
+}
+
+function unlockTtsForGesture() {
+  try {
+    if (window.speechSynthesis) {
+      const u = new SpeechSynthesisUtterance(' ');
+      u.volume = 0;
+      window.speechSynthesis.speak(u);
+    }
+  } catch (_) {}
+  try {
+    // Azure 読み上げ用の audio 要素を、無音の再生でロック解除して使い回す
+    if (!window._ttsAudioEl) window._ttsAudioEl = new Audio();
+    const a = window._ttsAudioEl;
+    a.src = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=';
+    const pr = a.play();
+    if (pr && pr.catch) pr.catch(() => {});
+  } catch (_) {}
+}
+
+async function startLiveInner(audioCtx) {
+  if (typeof SpeechSDK === 'undefined') {
+    alert('Azure Speech SDK の読み込みに失敗しました。インターネット接続を確認してください。');
+    return;
+  }
+
+  let audioMediaStream;
+
+  if (audioSource === 'mic') {
+    // ===== マイク入力 =====
+    try {
+      const constraints = {
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl:  true,
+          ...(selectedMicId ? { deviceId: { exact: selectedMicId } } : {})
+        }
+      };
+      audioMediaStream = await navigator.mediaDevices.getUserMedia(constraints);
+      window._liveMicStream = audioMediaStream;
+    } catch (err) {
+      alert(`マイクへのアクセスに失敗しました:\n${err.message}\nブラウザのマイク許可を確認してください。`);
+      return;
+    }
+
+  } else {
+    // ===== システム音声入力 =====
+    // getDisplayMedia() は Chrome/Edge (Windows) で動作。Firefox は非対応。
+    // macOS はタブ音声のみ可（システム全体の音声は仮想ドライバが必要）。
+    setStatus('画面共有ダイアログを確認してください...');
+    try {
+      const dispStream = await navigator.mediaDevices.getDisplayMedia({
+        video: true,   // Chrome は video:true が必要（audio 単独は不安定）
+        audio: {
+          echoCancellation:          false,
+          noiseSuppression:          false,
+          autoGainControl:           false,
+          suppressLocalAudioPlayback: false,
+        }
+      });
+
+      const audioTracks = dispStream.getAudioTracks();
+      if (audioTracks.length === 0) {
+        dispStream.getTracks().forEach(t => t.stop());
+        alert(
+          'システム音声が取得できませんでした。\n\n' +
+          '【Chrome/Edge の場合】\n' +
+          '・タブを共有: ダイアログ下部の「タブの音声を共有」をONにする\n' +
+          '・画面/ウィンドウを共有: 「システムの音声を共有する」にチェックを入れる\n\n' +
+          '※ macOS はタブ音声のみ対応です'
+        );
+        setStatus('待機中');
+        return;
+      }
+
+      // ★Fix1: ビデオトラックを即時停止しない
+      // Chromeはビデオ停止をセッション終了と判断してオーディオも無効化するケースがある。
+      // ビデオトラックは stopLive() で一括停止する。
+      // （画面キャプチャの映像は使わないが、共有インジケーターは表示されたまま）
+
+      audioMediaStream = new MediaStream(audioTracks);
+      window._liveDisplayStream = dispStream; // 全トラックをstopLive()で停止するため保持
+      window._liveMicStream = audioMediaStream;
+
+      // ユーザーが「共有を停止」ボタンを押した場合
+      audioTracks[0].addEventListener('ended', () => {
+        if (isLive) stopLive('システム音声の共有が停止されました');
+      });
+
+    } catch (err) {
+      if (err.name === 'NotAllowedError') {
+        // キャンセルされた場合は静かに終了
+        setStatus('待機中');
+        return;
+      }
+      alert(`システム音声の取得に失敗しました:\n${err.message}`);
+      setStatus('待機中');
+      return;
+    }
+  }
+
+  // ===== 以下はマイク・システム音声共通 =====
+  // ターゲット言語は 2〜4 文字の言語コード（ロケールではない）
+  const tgtCode = LANGS[cfg.tgtLang]?.tc || 'ja';
+  const srcCode = LANGS[cfg.srcLang]?.tc || 'en';
+  const useLlm  = (cfg.engine === 'llm') && (srcCode !== tgtCode);
+
+  if (audioCtx.state === 'suspended') { try { await audioCtx.resume(); } catch (_) {} }
+
+  const source    = audioCtx.createMediaStreamSource(audioMediaStream);
+  const processor = audioCtx.createScriptProcessor(4096, 2, 1);
+
+  // 1回の LIVE（待機・再開をまたいで続く）の状態
+  lv = {
+    tgtCode, srcCode, useLlm,
+    sampleRate: audioCtx.sampleRate,
+    push: null,            // Speech へ音声を送るストリーム（接続中のみ）
+    connected: false,      // Speech に接続中か（課金対象か）
+    everConnected: false,  // 一度でも接続に成功したか
+    retries: 0,            // 通信エラー時の再接続回数
+    resuming: false,
+    preroll: [], prerollSamples: 0,   // 待機中の直前2秒分の音声
+    loudChunks: 0,                    // 再開判定: しきい値を超えた連続回数
+  };
+
+  processor.onaudioprocess = (e) => {
+    const ch0   = e.inputBuffer.getChannelData(0);
+    const numCh = e.inputBuffer.numberOfChannels;
+    const int16 = new Int16Array(ch0.length);
+    let sumSq = 0;
+    for (let i = 0; i < ch0.length; i++) {
+      let sample = ch0[i];
+      if (numCh >= 2) sample = (sample + e.inputBuffer.getChannelData(1)[i]) * 0.5;
+      const s = Math.max(-1, Math.min(1, sample));
+      sumSq += s * s;
+      int16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+    }
+    if (!lv) return;
+    const ms = sumSq / ch0.length;
+    const db = 10 * Math.log10(ms + 1e-12);
+    paintLevel(db);
+    if (ms > 1e-6 && !diagState.audio?.startsWith('🎚')) diag('audio', `🎚 音声入力あり（${lv.sampleRate}Hz）`);
+
+    if (lv.connected && lv.push) {
+      lv.push.write(int16.buffer);
+      return;
+    }
+    // 未接続（待機中・再接続中）: 直前2秒分だけ手元にためておく（再開時にまとめて送る）
+    lv.preroll.push(int16);
+    lv.prerollSamples += int16.length;
+    while (lv.prerollSamples > lv.sampleRate * PREROLL_SEC && lv.preroll.length > 1) {
+      lv.prerollSamples -= lv.preroll.shift().length;
+    }
+    // 待機中: 一定以上の音量が約0.3秒続いたら再開
+    if (isLive && isStandby) {
+      lv.loudChunks = db > resumeThresholdDb() ? lv.loudChunks + 1 : 0;
+      if (lv.loudChunks >= RESUME_CHUNKS) resumeFromStandby();
+    }
+  };
+
+  source.connect(processor);
+  processor.connect(audioCtx.destination);
+
+  window._liveAudioCtx  = audioCtx;
+  window._liveProcessor = processor;
+
+  resetDiag();
+  diag('audio', '🔇 音声入力なし（無音）');
+  updateLevelMark();
+  connectSpeech();
+  return true;
+}
+
+// ===== Speech への接続（初回・待機からの再開・通信エラー後の再接続で共通）=====
+const PREROLL_SEC   = 2;   // 再開時に先頭へ足す直前の音声（秒）
+const RESUME_CHUNKS = 4;   // 4096サンプル×4 ≒ 0.34秒（48kHz）しきい値を超え続けたら再開
+const RESUME_DB     = { high: -55, mid: -45, low: -35 };  // 再開の感度（dBFS）
+function resumeThresholdDb() { return RESUME_DB[cfg.resumeSens] ?? RESUME_DB.mid; }
+
+function connectSpeech() {
+  if (!lv) return;
+  const { tgtCode, srcCode, useLlm } = lv;
+  const firstTime = !lv.everConnected;
+
+  // ★ LLM モード: SpeechConfig（音声認識のみ・$1/時）→ 確定文を LLM で翻訳
+  // ★ NMT モード: SpeechTranslationConfig（認識＋翻訳・$2.50/時）＝従来方式
+  const speechConfig = useLlm
+    ? SpeechSDK.SpeechConfig.fromSubscription(cfg.speechKey, cfg.speechRegion)
+    : SpeechSDK.SpeechTranslationConfig.fromSubscription(cfg.speechKey, cfg.speechRegion);
+  speechConfig.speechRecognitionLanguage = cfg.srcLang;
+  if (!useLlm) speechConfig.addTargetLanguage(tgtCode);
+
+  // DICTATION モード（講演・プレゼン向け長文認識）
+  speechConfig.setProperty(SpeechSDK.PropertyId.SpeechServiceConnection_RecoMode, 'DICTATION');
+  // ★ セグメンテーション: 会議(800ms) / 標準(1200ms) / 登壇(2000ms)
+  speechConfig.setProperty(SpeechSDK.PropertyId.Speech_SegmentationSilenceTimeoutMs, SEG_MS[cfg.segMode] || '1200');
+  // ★ 1区切りを最長20秒に制限（SDK の有効範囲は 20,000〜70,000ms）
+  if (SpeechSDK.PropertyId.Speech_SegmentationMaximumTimeMs !== undefined) {
+    speechConfig.setProperty(SpeechSDK.PropertyId.Speech_SegmentationMaximumTimeMs, '20000');
+  }
+
+  const format      = SpeechSDK.AudioStreamFormat.getWaveFormatPCM(lv.sampleRate, 16, 1);
+  const pushStream  = SpeechSDK.AudioInputStream.createPushStream(format);
+  const audioConfig = SpeechSDK.AudioConfig.fromStreamInput(pushStream);
+
+  // 待機中にためた直前の音声を先に送り、話し始めを取りこぼさない
+  for (const chunk of lv.preroll) pushStream.write(chunk.buffer);
+  lv.preroll = []; lv.prerollSamples = 0; lv.loudChunks = 0;
+  lv.push = pushStream;
+  lv.connected = true;
+  lastTickAt = Date.now();
+
+  recognizer = useLlm
+    ? new SpeechSDK.SpeechRecognizer(speechConfig, audioConfig)
+    : new SpeechSDK.TranslationRecognizer(speechConfig, audioConfig);
+  const thisRec = recognizer;   // 停止・切断後に遅れて届くイベントを無視するための目印
+
+  const phrases = getPhraseList();
+  if (phrases.length > 0) {
+    const phraseList = SpeechSDK.PhraseListGrammar.fromRecognizer(recognizer);
+    phrases.forEach(p => phraseList.addPhrase(p));
+  }
+
+  diag('speech', `⏳ Speech 接続中（${cfg.speechRegion}・${useLlm ? '音声認識' : 'Speech翻訳'}）`);
+  recognizer.sessionStarted      = () => { if (lv) lv.retries = 0; diag('speech', '✅ Speech 接続OK'); };
+  recognizer.speechStartDetected = () => diag('heard', '🗣 発話を検出');
+
+  // 認識途中: LLM モードは英文のみ、NMT モードは途中訳も表示
+  recognizer.recognizing = (s, e) => {
+    if (!isLive || recognizer !== thisRec) return;
+    if (e.result.text) {
+      lastSpeechAt = Date.now();
+      if (!diagState.heard?.startsWith('📝')) diag('heard', '📝 認識できています');
+      if (useLlm) {
+        setInterim(e.result.text);
+      } else {
+        const interimTranslated = e.result.translations?.get(tgtCode);
+        setInterim(interimTranslated || e.result.text, e.result.text);
+      }
+      setStatus('音声検出中...');
+    }
+  };
+
+  // 文章確定
+  recognizer.recognized = (s, e) => {
+    const ok = e.result.reason === SpeechSDK.ResultReason.TranslatedSpeech
+            || e.result.reason === SpeechSDK.ResultReason.RecognizedSpeech;
+    if (!ok || !e.result.text) return;
+    if (!isLive || recognizer !== thisRec) return;   // 停止・切断処理中の最終結果は捨てる
+    lastSpeechAt = Date.now();
+    clearInterim();
+    const original = e.result.text;
+
+    if (useLlm) {
+      // ★ 翻訳は並列に開始し、表示は発話順を守る（translationChain で直列化）
+      const context = srcHistory.slice(-cfg.ctxCount);
+      srcHistory.push(original);
+      if (srcHistory.length > 10) srcHistory.shift();
+      const sid = liveSessionId;
+      const pending = translateWithLlm(original, context, srcCode, tgtCode);
+      showTranslating(original);
+      translationChain = translationChain
+        .then(() => pending)
+        .then(res => { if (isLive && sid === liveSessionId) enqueue(original, res.text, res.engine); })
+        .catch(err => console.error('translation chain error:', err));
+    } else {
+      const translated = (srcCode === tgtCode)
+        ? original
+        : (e.result.translations?.get(tgtCode) || original);
+      enqueue(original, translated, 'speech');
+    }
+    setStatus('認識中...');
+  };
+
+  recognizer.canceled = (s, e) => {
+    if (recognizer !== thisRec) return;   // こちらから切断した接続のキャンセルは無視
+    if (!isLive && e.reason !== SpeechSDK.CancellationReason.Error) return;
+    let msg = e.reason === SpeechSDK.CancellationReason.Error
+      ? `認識エラー(${e.errorCode}): ${e.errorDetails}`
+      : '認識がキャンセルされました';
+
+    // 一度つながっていた後の通信エラー（会場の Wi-Fi 瞬断など）は、2秒後に最大3回まで自動で再接続
+    if (e.reason === SpeechSDK.CancellationReason.Error && lv && lv.everConnected && lv.retries < MAX_RETRIES) {
+      lv.retries++;
+      diag('speech', `🔁 通信エラーのため再接続します（${lv.retries}/${MAX_RETRIES}）`);
+      console.warn(msg);
+      tickCost();
+      disconnectSpeech();
+      setStatus(`通信が切れました。再接続中...（${lv.retries}/${MAX_RETRIES}）`);
+      setTimeout(() => { if (isLive && lv && !lv.connected && !isStandby) connectSpeech(); }, 2000);
+      return;
+    }
+    // 1006 / 接続失敗は、ほとんどが「キーとリージョンの組み合わせ違い」
+    if (/1006|Unable to contact server/i.test(e.errorDetails || '') && !(lv && lv.everConnected)) {
+      msg = `Speech に接続できません。Speech キーとリージョン（${cfg.speechRegion}）が同じリソースのものか確認してください`;
+    }
+    diag('speech', `❌ ${msg}`);
+    console.warn(msg);
+    stopLive(msg);
+  };
+
+  recognizer.sessionStopped = () => { if (isLive && recognizer === thisRec) stopLive(); };
+
+  recognizer.startContinuousRecognitionAsync(
+    () => {
+      // 開始完了より先に停止・切断していたら何もしない
+      if (recognizer !== thisRec || !lv) return;
+      lv.resuming = false;
+      if (firstTime) {
+        lv.everConnected = true;
+        isLive = true;
+        isStandby = false;
+        ttsQueue = [];
+        ttsPlaying = false;
+        liveSessionId++;
+        srcHistory = [];
+        pendingTranslations = 0;
+        liveStartedAt = Date.now();
+        lastSpeechAt  = Date.now();
+        sessionCost = { audioSec: 0, inTok: 0, outTok: 0, nmtChars: 0, engine: useLlm ? 'llm' : 'nmt' };
+        costTotalAtStart = costTotalYen;
+        startWatchdog();
+        requestWakeLock();
+        setUILive(true);
+        const srcLabel = audioSource === 'mic' ? 'マイク' : 'システム音声';
+        setStatus(`認識中... （${srcLabel}から入力受付中）`);
+        document.getElementById('emptyState').classList.add('hidden');
+      } else {
+        // 待機からの再開・再接続
+        isStandby = false;
+        lastSpeechAt = Date.now();
+        setStandbyUI(false);
+        setStatus('▶ 再開しました');
+      }
+    },
+    err => {
+      console.error('SDK start error:', err);
+      if (firstTime) {
+        alert(`音声認識の開始に失敗しました:\n${err}\n\nキーとリージョンを確認してください。`);
+        stopLive('開始に失敗しました');
+      } else {
+        stopLive(`再接続に失敗しました: ${err}`);
+      }
+    }
+  );
+}
+const MAX_RETRIES = 3;
+
+// Speech との接続だけを切る（音声の取り込みは続ける）
+function disconnectSpeech() {
+  if (recognizer) {
+    const rec = recognizer;   // 新しい recognizer を誤って閉じないよう、止める対象を固定
+    recognizer = null;
+    rec.stopContinuousRecognitionAsync(
+      () => { try { rec.close(); } catch (_) {} },
+      err => { console.error(err); try { rec.close(); } catch (_) {} }
+    );
+  }
+  if (lv) {
+    if (lv.push) { try { lv.push.close(); } catch (_) {} }
+    lv.push = null;
+    lv.connected = false;
+  }
+}
+
+// ===== 待機（無音が続いたら Speech を切って課金を止め、声を検出したら自動で再開）=====
+function enterStandby() {
+  if (!isLive || isStandby || !lv) return;
+  tickCost();
+  disconnectSpeech();
+  isStandby = true;
+  standbySince = Date.now();
+  lv.loudChunks = 0;
+  clearInterim();
+  setStandbyUI(true);
+  setStatus(`⏸ 待機中（無音${cfg.autoStopMin}分）— 声を検出すると自動で再開します。課金は止まっています`);
+  diag('speech', '⏸ 待機中（Speech 切断）');
+  diag('heard', '');
+  renderCost();
+}
+
+function resumeFromStandby() {
+  if (!isLive || !isStandby || !lv || lv.resuming) return;
+  lv.resuming = true;
+  setStatus('▶ 声を検出しました。再接続中...');
+  connectSpeech();
+}
+
+// ===== Stop =====
+function stopLive(reason) {
+  // TTS停止
+  if (currentAudio) { currentAudio.pause(); currentAudio = null; }
+
+  // 費用を確定（切断前に、接続中の分を数える）
+  if (isLive) tickCost();
+
+  // Speech 切断 → 音声の取り込みを停止
+  disconnectSpeech();
+  if (window._liveProcessor)     { window._liveProcessor.onaudioprocess = null; window._liveProcessor.disconnect(); window._liveProcessor = null; }
+  if (window._liveAudioCtx)      { window._liveAudioCtx.close(); window._liveAudioCtx = null; }
+  if (window._liveMicStream)     { window._liveMicStream.getTracks().forEach(t => t.stop()); window._liveMicStream = null; }
+  // システム音声モード: displayStream の残トラックも全停止
+  if (window._liveDisplayStream) { window._liveDisplayStream.getTracks().forEach(t => t.stop()); window._liveDisplayStream = null; }
+  // Web Speech API の読み上げ中断
+  if (window.speechSynthesis) window.speechSynthesis.cancel();
+
+  // 費用を確定して累計に加算、タイマー・画面ロックを解除
+  if (isLive) {
+    costTotalYen = costTotalAtStart + sessionYen();
+    saveCostTotal(costTotalYen);
+  }
+  stopWatchdog();
+  releaseWakeLock();
+
+  isLive = false;
+  isStandby = false;
+  lv = null;
+  setStandbyUI(false);
+  paintLevel(-100);
+  ttsQueue = [];
+  ttsPlaying = false;
+  pendingTranslations = 0;
+  translationChain = Promise.resolve();
+  clearInterim();
+  hideQueuePreview();
+  setUILive(false);
+  setStatus(typeof reason === 'string' && reason ? reason : '停止しました');
+  updateQueueBadge();
+  renderCost();
+}
+
+// ===== LLM 翻訳（Foundry / Azure OpenAI v1 Chat Completions）=====
+const LLM_TIMEOUT_MS = 6000;   // これを超えたら機械翻訳で代替して先に進める
+
+function buildSystemPrompt(srcCode, tgtCode) {
+  const srcName = LANGS[cfg.srcLang]?.name || srcCode;
+  const tgtName = LANGS[cfg.tgtLang]?.name || tgtCode;
+  const terms   = [...new Set([...DEFAULT_TERMS, ...getUserTerms()])].slice(0, 200);
+  const toneRule = (tgtCode === 'ja')
+    ? (cfg.tone === 'plain' ? '・文体は「だ・である」調。' : '・文体は「です・ます」調の自然な話し言葉。')
+    : '';
+  return [
+    `あなたはテクノロジーカンファレンス（Microsoft Power Platform 関連）の同時通訳者です。`,
+    `登壇者が話した${srcName}の発話を、聴講者向けの${tgtName}字幕に訳します。`,
+    ``,
+    `# ルール`,
+    `・直訳ではなく、聞いて自然に意味が取れる${tgtName}にする。語順は${tgtName}として自然に組み替えてよい。`,
+    toneRule,
+    `・字幕なので簡潔に。言いよどみ（um, uh, you know, like など）や同じ語の繰り返しは省く。`,
+    `・製品名・機能名・固有名詞は英語表記のまま残す。特に次の語は訳さない: ${terms.join(', ')}`,
+    `・音声認識の誤りと思われる語は、文脈と上記の用語から正しい語を推測して訳す。`,
+    `・「直前の発話」は文脈を理解するためだけに使い、訳文には含めない。`,
+    `・訳すべき発話が途中で切れていても、補いすぎずにその部分だけを自然に訳す。`,
+    `・出力は訳文のみ。説明・注釈・引用符・前置きは書かない。`,
+  ].filter(Boolean).join('\n');
+}
+
+async function callLlm(original, context, srcCode, tgtCode, effort) {
+  const userMsg = (context.length
+    ? `直前の発話（訳さない）:\n${context.map(s => `- ${s}`).join('\n')}\n\n`
+    : '') + `訳す発話:\n${original}`;
+
+  const body = {
+    model: cfg.aoaiDeployment,
+    messages: [
+      { role: 'system', content: buildSystemPrompt(srcCode, tgtCode) },
+      { role: 'user',   content: userMsg },
+    ],
+    max_completion_tokens: effort === 'none' ? 400 : 1200,  // 推論トークンも含む上限
+    reasoning_effort: effort,
+  };
+
+  const ctrl  = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), LLM_TIMEOUT_MS);
+  try {
+    const res = await fetch(`${cfg.aoaiEndpoint}/openai/v1/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'api-key': cfg.aoaiKey },
+      body: JSON.stringify(body),
+      signal: ctrl.signal,
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const msg = data?.error?.message || `HTTP ${res.status}`;
+      const err = new Error(msg);
+      err.status = res.status;
+      throw err;
+    }
+    const u = data.usage || {};
+    sessionCost.inTok  += u.prompt_tokens     || 0;
+    sessionCost.outTok += u.completion_tokens || 0;
+    const text = (data.choices?.[0]?.message?.content || '').trim();
+    if (!text) throw new Error('LLM の応答が空でした');
+    diag('llm', `✅ LLM OK（${effort}）`);
+    return text;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function translateWithLlm(original, context, srcCode, tgtCode) {
+  try {
+    try {
+      return { text: await callLlm(original, context, srcCode, tgtCode, cfg.reasoningEffort), engine: 'llm' };
+    } catch (err) {
+      // reasoning_effort: none 非対応のモデルなら low に切り替えて再試行（以降は low を使う）
+      if (err.status === 400 && cfg.reasoningEffort === 'none' && /reasoning/i.test(err.message)) {
+        cfg.reasoningEffort = 'low';
+        SS.setItem('lvCfg', JSON.stringify(cfg));
+        if (!effortFallbackNotified) {
+          effortFallbackNotified = true;
+          console.warn('reasoning_effort=none が使えないため low に切り替えました:', err.message);
+          setStatus('推論「なし」非対応のため「低」に切替');
+        }
+        return { text: await callLlm(original, context, srcCode, tgtCode, 'low'), engine: 'llm' };
+      }
+      throw err;
+    }
+  } catch (err) {
+    const why = err.name === 'AbortError' ? 'タイムアウト'
+              : (err instanceof TypeError ? '通信不可（CORS/URL を確認）' : (err.status ? `HTTP ${err.status}: ${err.message}` : err.message));
+    diag('llm', `❌ LLM 失敗: ${why}`);
+    console.warn('LLM 翻訳失敗 → 機械翻訳で代替:', why);
+    if (err.status === 401 || err.status === 404) setStatus(`LLM エラー ${err.status}：エンドポイント・キー・デプロイ名を確認`);
+    try {
+      return { text: await translateWithNmt(original, srcCode, tgtCode), engine: 'nmt' };
+    } catch (err2) {
+      console.warn('機械翻訳も失敗:', err2.message);
+      return { text: original, engine: 'source' };
+    }
+  } finally {
+    doneTranslating();
+  }
+}
+
+// ===== 代替: Translator（Speech と同じマルチサービスキーで呼べる場合のみ）=====
+async function translateWithNmt(text, srcCode, tgtCode) {
+  const url = `https://api.cognitive.microsofttranslator.com/translate?api-version=3.0&from=${srcCode}&to=${tgtCode}`;
+  const ctrl  = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 4000);
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Ocp-Apim-Subscription-Key':    cfg.speechKey,
+        'Ocp-Apim-Subscription-Region': cfg.speechRegion,
+      },
+      body: JSON.stringify([{ Text: text }]),
+      signal: ctrl.signal,
+    });
+    if (!res.ok) throw new Error(`Translator HTTP ${res.status}`);
+    const data = await res.json();
+    sessionCost.nmtChars += text.length;
+    return data?.[0]?.translations?.[0]?.text || text;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// ===== 費用の概算・自動停止・画面スリープ防止 =====
+function sessionYen() {
+  const audioRate = sessionCost.engine === 'nmt' ? PRICE.nmtPerHourUsd : PRICE.sttPerHourUsd;
+  const usd = (sessionCost.audioSec / 3600) * audioRate
+            + (sessionCost.inTok  / 1e6) * PRICE.llmInPerMUsd
+            + (sessionCost.outTok / 1e6) * PRICE.llmOutPerMUsd
+            + (sessionCost.nmtChars / 1e6) * PRICE.nmtCharPerMUsd;
+  return usd * PRICE.jpyPerUsd;
+}
+
+let lastTickAt = 0;
+function tickCost() {
+  const now = Date.now();
+  // Speech に接続している間だけ秒課金（待機中は加算しない）
+  if (lastTickAt && lv && lv.connected) sessionCost.audioSec += (now - lastTickAt) / 1000;
+  lastTickAt = now;
+}
+
+function renderCost() {
+  const now   = isLive ? sessionYen() : 0;
+  const total = isLive ? costTotalAtStart + now : costTotalYen;
+  const el = document.getElementById('costBadge');
+  if (!el) return;
+  el.textContent = `💴 ¥${Math.round(now).toLocaleString()} / 累計 ¥${Math.round(total).toLocaleString()}`;
+  el.classList.toggle('warn', cfg.budgetWarn > 0 && total >= cfg.budgetWarn);
+}
+
+function startWatchdog() {
+  stopWatchdog();
+  lastTickAt = Date.now();
+  watchdogTimer = setInterval(() => {
+    if (!isLive) return;
+    tickCost();
+    renderCost();
+    // タブが落ちても累計が残るよう、定期的に保存
+    saveCostTotal(costTotalAtStart + sessionYen());
+
+    const now = Date.now();
+    if (!isStandby && lv && lv.connected && cfg.autoStopMin > 0 && now - lastSpeechAt > cfg.autoStopMin * 60000) {
+      enterStandby();
+    } else if (isStandby && cfg.standbyMaxMin > 0 && now - standbySince > cfg.standbyMaxMin * 60000) {
+      stopLive(`待機が${cfg.standbyMaxMin}分続いたため停止しました`);
+    }
+  }, 5000);
+}
+function stopWatchdog() {
+  if (watchdogTimer) { clearInterval(watchdogTimer); watchdogTimer = null; }
+  lastTickAt = 0;
+}
+
+function loadCostTotal() {
+  try { return parseFloat(LS.getItem('lvCostTotalYen') || '0') || 0; } catch (_) { return 0; }
+}
+function saveCostTotal(v) {
+  try { LS.setItem('lvCostTotalYen', String(v)); } catch (_) {}
+}
+function resetCostTotal() {
+  if (isLive) return;
+  if (!confirm('累計の概算費用を 0 円に戻しますか？')) return;
+  costTotalYen = 0;
+  saveCostTotal(0);
+  renderCost();
+}
+
+async function requestWakeLock() {
+  try {
+    if ('wakeLock' in navigator) {
+      wakeLock = await navigator.wakeLock.request('screen');
+    }
+  } catch (e) { console.warn('Wake Lock 取得失敗:', e.message); }
+}
+function releaseWakeLock() {
+  try { if (wakeLock) wakeLock.release(); } catch (_) {}
+  wakeLock = null;
+}
+// タブ復帰時に画面ロックを取り直す（タブ切替で自動解除されるため）
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && isLive) requestWakeLock();
+});
+
+// ===== TTS Queue =====
+function enqueue(original, translated, engine = 'speech') {
+  ttsQueue.push({ original, translated, engine });
+  updateQueueBadge();
+  if (!ttsPlaying) drainQueue();
+}
+
+async function drainQueue() {
+  if (ttsQueue.length === 0) {
+    ttsPlaying = false;
+    setSpeaking(false);
+    updateQueueBadge();
+    hideQueuePreview();
+    return;
+  }
+  ttsPlaying = true;
+  const { original, translated, engine } = ttsQueue.shift();
+  updateQueueBadge();
+
+  // メインエリアに昇格して表示
+  displaySubtitle(original, translated, engine);
+  addHistory(original, translated, engine);
+
+  // 待機中の次のアイテムを待機エリアに表示（あれば）
+  if (ttsQueue.length > 0) {
+    const next = ttsQueue[0];
+    setQueuePreview('待機中', next.original, ttsQueue.length);
+  } else {
+    hideQueuePreview();
+  }
+
+  // 読み上げ
+  // ★ 読み上げが登壇者に追いつかず2件以上たまったら、その間は読み上げを飛ばして字幕だけ進める
+  const catchingUp = ttsQueue.length >= 2;
+  setSpeaking(ttsEnabled && !catchingUp && engine !== 'source');
+  try {
+    if (ttsEnabled && !catchingUp && engine !== 'source') {
+      await speakTTS(translated, cfg.tgtLang);
+    } else {
+      // TTS無効時は字幕表示のみ（最低表示時間だけ待機）
+      await new Promise(r => setTimeout(r, 600));
+    }
+  } catch (err) {
+    console.error('TTS error:', err);
+    document.getElementById('translatedText').textContent = `⚠️ 音声出力エラー`;
+    document.getElementById('originalText').textContent = err.message;
+    setStatus('TTSエラー: ' + err.message);
+  }
+  setSpeaking(false);
+  drainQueue();
+}
+
+// ===== TTS ディスパッチャ: エンジンに応じて分岐 =====
+function speakTTS(text, langCode) {
+  return (cfg.ttsEngine === 'azure') ? speakAzureTTS(text, langCode) : speakWebSpeech(text, langCode);
+}
+
+// ★ Web Speech API（ブラウザ内蔵）: ネットワーク不要で即時再生
+function speakWebSpeech(text, langCode) {
+  return new Promise((resolve, reject) => {
+    if (!window.speechSynthesis) {
+      reject(new Error('このブラウザは Web Speech API に対応していません'));
+      return;
+    }
+    window.speechSynthesis.cancel(); // 前の発話をキャンセル
+    const utt    = new SpeechSynthesisUtterance(text);
+    utt.lang     = langCode;
+    utt.volume   = currentVolume;
+    utt.rate     = currentRate;
+    utt.onend    = () => resolve();
+    utt.onerror  = (ev) => {
+      // 'interrupted' は cancel() による正常停止なので無視
+      if (ev.error === 'interrupted') { resolve(); return; }
+      reject(new Error(`Web Speech エラー: ${ev.error}`));
+    };
+    window.speechSynthesis.speak(utt);
+  });
+}
+
+// ★ Azure Neural TTS（高品質・低遅延は犠牲になるが音声品質が高い）
+function speakAzureTTS(text, langCode) {
+  const voice   = LANGS[langCode]?.voice || 'ja-JP-NanamiNeural';
+  const escaped = text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const ratePct = Math.round((currentRate - 1) * 100);
+  const rateAttr = `${ratePct >= 0 ? '+' : ''}${ratePct}%`;   // 例: 1.3倍 → +30%
+  const ssml    = `<speak version='1.0' xml:lang='${langCode}'><voice name='${voice}'><prosody rate='${rateAttr}'>${escaped}</prosody></voice></speak>`;
+
+  return fetch(`https://${cfg.speechRegion}.tts.speech.microsoft.com/cognitiveservices/v1`, {
+    method: 'POST',
+    headers: {
+      'Ocp-Apim-Subscription-Key': cfg.speechKey,
+      'Content-Type': 'application/ssml+xml',
+      'X-Microsoft-OutputFormat': 'audio-24khz-48kbitrate-mono-mp3',
+    },
+    body: ssml,
+  })
+  .then(res => {
+    if (!res.ok) throw new Error(`TTS ${res.status}`);
+    return res.blob();
+  })
+  .then(blob => {
+    const url = URL.createObjectURL(blob);
+    return new Promise((resolve, reject) => {
+      const audio = window._ttsAudioEl || new Audio();
+      audio.src = url;
+      currentAudio = audio;
+      audio.volume = currentVolume;
+      audio.onended = () => { currentAudio = null; URL.revokeObjectURL(url); resolve(); };
+      audio.onerror = () => { currentAudio = null; URL.revokeObjectURL(url); reject(new Error('音声再生エラー')); };
+      audio.play().catch(reject);
+    });
+  });
+}
+
+// ===== UI =====
+function setStandbyUI(on) {
+  const badge = document.getElementById('liveBadge');
+  if (!isLive && !on) return;
+  badge.className = `live-badge ${on ? 'off' : 'on'}`;
+  document.getElementById('liveBadgeText').textContent = on ? 'WAIT' : 'LIVE';
+  document.getElementById('waveform').classList.toggle('active', !on);
+}
+
+function setUILive(live) {
+  const badge = document.getElementById('liveBadge');
+  const btn   = document.getElementById('mainBtn');
+  const wave  = document.getElementById('waveform');
+  badge.className = `live-badge ${live ? 'on' : 'off'}`;
+  document.getElementById('liveBadgeText').textContent = live ? 'LIVE' : 'STANDBY';
+  btn.className = `btn-toggle ${live ? 'stop' : 'start'}`;
+  btn.textContent = live ? '■ 停止' : '▶ 開始';
+  wave.classList.toggle('active', live);
+}
+
+// ★ インタリム表示: 翻訳テキストをメインに、原文を小さく下に添える
+function tail(t, n = 220) { t = String(t || ''); return t.length > n ? '…' + t.slice(-n) : t; }
+function setInterim(translatedText, sourceText) {
+  translatedText = tail(translatedText);
+  sourceText = sourceText && tail(sourceText);
+  const el = document.getElementById('interimText');
+  if (sourceText && translatedText !== sourceText) {
+    el.innerHTML = esc(translatedText)
+      + `<br><span style="font-size:0.72em;opacity:0.45;">${esc(sourceText)}</span>`;
+  } else {
+    el.textContent = translatedText || '';
+  }
+}
+function clearInterim() {
+  document.getElementById('interimText').textContent = '';
+}
+
+const ENGINE_MARK = { llm: '', nmt: ' ・機械翻訳', speech: '', source: ' ・翻訳失敗（原文）' };
+
+function displaySubtitle(original, translated, engine = 'speech') {
+  const tEl = document.getElementById('translatedText');
+  const oEl = document.getElementById('originalText');
+  // Re-trigger animation
+  tEl.style.animation = 'none';
+  tEl.offsetHeight; // reflow
+  tEl.style.animation = '';
+  tEl.classList.toggle('pending', engine === 'source');
+  const len = String(translated).length;
+  tEl.classList.toggle('long',  len > 60 && len <= 140);
+  tEl.classList.toggle('xlong', len > 140);
+  tEl.textContent = translated;
+  const stage = document.querySelector('.stage');
+  if (stage) stage.scrollTop = 0;
+  // LLM が間に合わず機械翻訳で代替した場合などは原文の後ろに印を付ける
+  oEl.textContent = engine === 'source' ? `${ENGINE_MARK.source}` : `（${original}）${ENGINE_MARK[engine] || ''}`;
+}
+
+function setSpeaking(on) {
+  document.getElementById('speakingIndicator').classList.toggle('visible', on);
+}
+
+function setStatus(text) {
+  document.getElementById('statusText').textContent = text;
+}
+
+// 診断表示: どの段階まで進んだかを画面とコンソールに残す
+const diagState = {};
+function diag(key, value) {
+  diagState[key] = value;
+  const order = ['audio', 'speech', 'heard', 'llm'];
+  document.getElementById('diagText').textContent =
+    order.filter(k => diagState[k]).map(k => diagState[k]).join(' / ');
+  console.log('[LT]', key, value);
+}
+function resetDiag() { for (const k in diagState) delete diagState[k]; document.getElementById('diagText').textContent = ''; }
+let lastLevelPaint = 0;
+const dbToPct = db => Math.max(0, Math.min(100, Math.round((db + 70) / 60 * 100)));  // -70〜-10 dBFS を 0〜100%
+function paintLevel(db) {
+  const now = performance.now();
+  if (db > -100 && now - lastLevelPaint < 80) return;
+  lastLevelPaint = now;
+  const bar = document.getElementById('levelBar');
+  bar.style.width = dbToPct(db) + '%';
+  bar.style.background = (isStandby && db > resumeThresholdDb()) ? 'var(--queue)' : 'var(--success)';
+}
+// 再開しきい値の位置に目印を付ける
+function updateLevelMark() {
+  const m = document.getElementById('levelMark');
+  if (m) m.style.left = dbToPct(resumeThresholdDb()) + '%';
+}
+
+// ===== 待機エリア操作 =====
+function setQueuePreview(label, text, count) {
+  document.getElementById('queuePreviewLabel').textContent = label;
+  document.getElementById('queuePreviewText').textContent  = text;
+  document.getElementById('queuePreviewCount').textContent =
+    count > 1 ? `他 ${count - 1} 件待機中` : '';
+  document.getElementById('queuePreview').classList.add('visible');
+}
+
+// LLM 翻訳待ちがあれば「翻訳中」を出し続ける
+let pendingTranslations = 0;
+let lastPendingText = '';
+function showTranslating(original) {
+  if (!isLive) return;
+  pendingTranslations++;
+  lastPendingText = original;
+  if (ttsQueue.length === 0) setQueuePreview('翻訳中', original, pendingTranslations);
+}
+function doneTranslating() {
+  pendingTranslations = Math.max(0, pendingTranslations - 1);
+}
+
+function hideQueuePreview() {
+  if (isLive && pendingTranslations > 0) {
+    setQueuePreview('翻訳中', lastPendingText, pendingTranslations);
+    return;
+  }
+  document.getElementById('queuePreview').classList.remove('visible');
+}
+
+function updateQueueBadge() {
+  const n  = ttsQueue.length;
+  const el = document.getElementById('queueBadge');
+  document.getElementById('queueNum').textContent = n;
+  el.classList.toggle('visible', n > 0);
+}
+
+function addHistory(original, translated, engine = 'speech') {
+  const body  = document.getElementById('histBody');
+  const empty = body.querySelector('.hist-empty');
+  if (empty) empty.remove();
+
+  histCount++;
+  document.getElementById('histCount').textContent = histCount;
+
+  const now  = new Date();
+  const time = now.toLocaleTimeString('ja-JP', { hour:'2-digit', minute:'2-digit', second:'2-digit' });
+  const date = now.toLocaleDateString('ja-JP', { year:'numeric', month:'2-digit', day:'2-digit' });
+
+  // CSV用データを構造化して保持
+  histData.push({
+    no:         histCount,
+    date,
+    time,
+    srcLang:    LANGS[cfg.srcLang]?.name || cfg.srcLang,
+    tgtLang:    LANGS[cfg.tgtLang]?.name || cfg.tgtLang,
+    original,
+    translated,
+    engine: { llm: 'LLM', nmt: '機械翻訳(代替)', speech: 'Speech翻訳', source: '翻訳失敗' }[engine] || engine,
+  });
+
+  const entry = document.createElement('div');
+  entry.className = 'hist-entry';
+  entry.innerHTML = `
+    <div class="hist-time">${time}</div>
+    <div class="hist-content">
+      <div class="hist-translated">${esc(translated)}</div>
+      <div class="hist-original">${esc(original)}</div>
+    </div>`;
+  body.appendChild(entry);
+  body.scrollTop = body.scrollHeight;
+}
+
+function clearHistory() {
+  histCount = 0;
+  histData  = [];
+  document.getElementById('histCount').textContent = '0';
+  document.getElementById('histBody').innerHTML = '<div class="hist-empty">翻訳が確定すると、ここに字幕ログが表示されます</div>';
+}
+
+function downloadCSV() {
+  if (histData.length === 0) { alert('出力するログがありません。'); return; }
+
+  const cell = v => `"${String(v).replace(/"/g, '""')}"`;
+
+  const header = ['No', '日付', '時刻', '発話言語', '翻訳先言語', '発話テキスト', '翻訳テキスト', '翻訳方式'];
+  const rows   = histData.map(r => [
+    r.no, r.date, r.time, r.srcLang, r.tgtLang, r.original, r.translated, r.engine || ''
+  ].map(cell).join(','));
+
+  const bom  = '\uFEFF';
+  const csv  = bom + [header.map(cell).join(','), ...rows].join('\r\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url  = URL.createObjectURL(blob);
+
+  const a  = document.createElement('a');
+  const ts = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
+  a.href     = url;
+  a.download = `live-transcript-${ts}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function esc(t) {
+  return String(t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// SDK ロード確認
+window.addEventListener('load', () => {
+  if (typeof SpeechSDK === 'undefined') {
+    document.getElementById('statusText').textContent = '⚠ Speech SDK 読み込み失敗（ネット接続を確認）';
+  }
+});
+</script>
+</body>
+</html>
