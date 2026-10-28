@@ -762,6 +762,16 @@ body.mobile .field input, body.mobile .field select { font-size: 16px; } /* iOS 
     </div>
 
     <div class="field">
+      <label>🎤 聴講中のセッション（タイトル・概要を貼り付け）</label>
+      <textarea id="sessionInfo"
+        placeholder="セッション名と概要をそのまま貼り付け（任意）&#10;話題が分かると、聞き取り誤りを AI が推測しやすくなります。セッションが変わったら貼り替えてください"
+        style="width:100%;height:72px;padding:10px 13px;
+               background:rgba(255,255,255,0.04);
+               border:1px solid rgba(255,255,255,0.08);
+               border-radius:8px;color:var(--text-main);font-size:13px;resize:vertical;"></textarea>
+    </div>
+
+    <div class="field">
       <label>📌 用語集（認識ヒント＋英語のまま残す語）</label>
       <textarea id="phraseHints"
         placeholder="1行に1語（Power Platform 系の主要製品名は登録済み）&#10;登壇者名・セッション固有の用語を追加&#10;例: Managed Environments"
@@ -1032,6 +1042,16 @@ const DEFAULT_TERMS = [
   'Microsoft Fabric', 'Azure', 'Azure OpenAI', 'Microsoft Foundry', 'Dynamics 365',
   'SharePoint', 'Microsoft Teams', 'Microsoft Entra', 'Managed Environments',
   'MCP', 'ALM', 'DLP', 'CoE Starter Kit',
+  'Agent 365', 'Copilot Studio Kit', 'Power Platform admin center', 'Windows 365', 'GitHub Copilot',
+  'Microsoft Graph', 'Microsoft Purview', 'Azure AI Foundry', 'Model Context Protocol',
+];
+// 音声認識のヒント専用（訳では日本語にしてよい一般語）。会期中によく出る語
+const HINT_TERMS = [
+  'agent', 'agents', 'agent skills', 'skills', 'skill', 'computer use', 'plugins', 'plugin',
+  'MCP server', 'MCP servers', 'connector', 'connectors', 'agent flows', 'topics', 'knowledge sources',
+  'generative orchestration', 'autonomous agents', 'multi-agent', 'orchestration', 'maker', 'makers',
+  'admin', 'admins', 'environment', 'environments', 'solution', 'solutions', 'pipelines', 'governance',
+  'cloud PC', 'hosted browser', 'prompt', 'grounding', 'low-code', 'pro-code', 'Power Platform Community Conference',
 ];
 const SEG_MS = { meeting: '800', standard: '1200', presentation: '2000' };
 const MODE_LABEL = { meeting: '会議', standard: '標準', presentation: '登壇' };
@@ -1174,7 +1194,12 @@ function getUserTerms() {
 }
 function getPhraseList() {
   // 既定の製品名 + ユーザー追加分（重複除去）
-  return [...new Set([...DEFAULT_TERMS, ...getUserTerms()])].slice(0, 500);
+  return [...new Set([...DEFAULT_TERMS, ...getUserTerms(), ...HINT_TERMS])].slice(0, 500);
+}
+// ===== セッション情報（タイトル・概要）。話題を AI に伝えて、聞き取り誤りの推測を当てやすくする =====
+const SESSION_INFO_MAX = 1500;
+function getSessionInfo() {
+  try { return (LS.getItem('lvSessionInfo') || '').trim().slice(0, SESSION_INFO_MAX); } catch (_) { return ''; }
 }
 
 // ===== Settings =====
@@ -1221,6 +1246,7 @@ function saveSettings() {
   effortFallbackNotified = false;
   SS.setItem('lvCfg', JSON.stringify(cfg));
   SS.setItem('lvPhrases', document.getElementById('phraseHints').value);
+  try { LS.setItem('lvSessionInfo', document.getElementById('sessionInfo').value.slice(0, SESSION_INFO_MAX)); } catch (_) {}
   try {
     if (document.getElementById('rememberKeys').checked) {
       LS.setItem('lvSavedCfg', JSON.stringify(cfg));
@@ -1257,6 +1283,7 @@ function openSettings() {
   set('standbyMaxMin',   String(cfg.standbyMaxMin));
   set('budgetWarn',      cfg.budgetWarn);
   set('phraseHints',     SS.getItem('lvPhrases') || '');
+  set('sessionInfo',     (() => { try { return LS.getItem('lvSessionInfo') || ''; } catch (_) { return ''; } })());
   let remembered = false;
   try { remembered = !!LS.getItem('lvSavedCfg'); } catch (_) {}
   document.getElementById('rememberKeys').checked = remembered;
@@ -1646,11 +1673,13 @@ function connectSpeech() {
 
     if (useLlm) {
       // ★ 翻訳は並列に開始し、表示は発話順を守る（translationChain で直列化）
-      const context = srcHistory.slice(-cfg.ctxCount);
-      srcHistory.push(original);
+      const context = srcHistory.slice(-cfg.ctxCount).map(h => ({ src: h.src, ja: h.ja }));
+      const hist = { src: original, ja: '' };
+      srcHistory.push(hist);
       if (srcHistory.length > 10) srcHistory.shift();
       const sid = liveSessionId;
       const pending = translateWithLlm(original, context, srcCode, tgtCode);
+      pending.then(res => { if (res.engine !== 'source') hist.ja = res.text; }).catch(() => {});
       showTranslating(original);
       translationChain = translationChain
         .then(() => pending)
@@ -1830,6 +1859,7 @@ function buildSystemPrompt(srcCode, tgtCode) {
   const srcName = LANGS[cfg.srcLang]?.name || srcCode;
   const tgtName = LANGS[cfg.tgtLang]?.name || tgtCode;
   const terms   = [...new Set([...DEFAULT_TERMS, ...getUserTerms()])].slice(0, 200);
+  const session = getSessionInfo();
   const toneRule = (tgtCode === 'ja')
     ? (cfg.tone === 'plain' ? '・文体は「だ・である」調。' : '・文体は「です・ます」調の自然な話し言葉。')
     : '';
@@ -1841,17 +1871,38 @@ function buildSystemPrompt(srcCode, tgtCode) {
     `・直訳ではなく、聞いて自然に意味が取れる${tgtName}にする。語順は${tgtName}として自然に組み替えてよい。`,
     toneRule,
     `・字幕なので簡潔に。言いよどみ（um, uh, you know, like など）や同じ語の繰り返しは省く。`,
-    `・製品名・機能名・固有名詞は英語表記のまま残す。特に次の語は訳さない: ${terms.join(', ')}`,
-    `・音声認識の誤りと思われる語は、文脈と上記の用語から正しい語を推測して訳す。`,
-    `・「直前の発話」は文脈を理解するためだけに使い、訳文には含めない。`,
+    `・英語のまま残すのは、製品名・サービス名と人名・社名だけ。次の語は訳さない: ${terms.join(', ')}`,
+    `・それ以外の一般語は日本語にする（agent→エージェント、skill→スキル、plugin→プラグイン、license→ライセンス、website→Webサイト、document→ドキュメント、user→ユーザー、admin→管理者、maker→作成者）。`,
+    ``,
+    `# 音声認識の誤りへの対処`,
+    `・発話は音声認識の結果で、単語の聞き間違いが多い。文脈・セッションの話題・用語から、本来の語を推測して訳す。`,
+    `・よくある例: "Indian skills"/"engine skills"→agent skills、"skin"/"scale"/"spill"→skill、"pilot studio"/"Copilot who"→Copilot Studio、"MCTS"→MCPs、"admiral"/"athletes"→admins、"plugging"→plugin。`,
+    `・推測しても意味が通らない語句は、無理に訳さず省く（「アルコール」「スパイシー」のような話題と無関係な語を作らない）。`,
+    `・発話全体が意味をなさない断片（"And I." "That's very, very." など）なら「…」だけを出力する。`,
+    ``,
+    `# 文脈の使い方`,
+    `・「直前の発話」は文脈を理解するためだけに使い、訳文には含めない。直前の訳語と用語・言い回しをそろえる。`,
     `・訳すべき発話が途中で切れていても、補いすぎずにその部分だけを自然に訳す。`,
-    `・出力は訳文のみ。説明・注釈・引用符・前置きは書かない。`,
-  ].filter(Boolean).join('\n');
+    ``,
+    `# 出力`,
+    `・訳文のみを1段落で出力する。改行・箇条書き・説明・注釈・引用符・前置きは書かない。`,
+    session ? `\n# 聴講中のセッション（話題の参考）\n${session}` : '',
+  ].filter(s => s !== null && s !== undefined && s !== false).join('\n').replace(/\n{3,}/g, '\n\n');
 }
 
+// 改行は字幕では邪魔なのでつなげる（日本語同士は空白なし、英字同士は空白1つ）
+function cleanLlmText(t) {
+  return String(t).trim()
+    .replace(/^["「『]|["」』]$/g, '')
+    .replace(/[ \t]*\n+[ \t]*/g, (m, off, str) => (/[A-Za-z0-9]/.test(str[off - 1] || '') && /[A-Za-z0-9]/.test(str[off + m.length] || '')) ? ' ' : '')
+    .trim();
+}
+const isEmptyTranslation = t => /^[…\.\s。・]*$/.test(t || '');
+
 async function callLlm(original, context, srcCode, tgtCode, effort) {
+  const line = c => (typeof c === 'string' ? `- ${c}` : `- ${c.src}${c.ja && c.ja !== '…' ? `\n  （訳: ${c.ja}）` : ''}`);
   const userMsg = (context.length
-    ? `直前の発話（訳さない）:\n${context.map(s => `- ${s}`).join('\n')}\n\n`
+    ? `直前の発話（訳さない）:\n${context.map(line).join('\n')}\n\n`
     : '') + `訳す発話:\n${original}`;
 
   const body = {
@@ -1883,7 +1934,7 @@ async function callLlm(original, context, srcCode, tgtCode, effort) {
     const u = data.usage || {};
     sessionCost.inTok  += u.prompt_tokens     || 0;
     sessionCost.outTok += u.completion_tokens || 0;
-    const text = (data.choices?.[0]?.message?.content || '').trim();
+    const text = cleanLlmText(data.choices?.[0]?.message?.content || '');
     if (!text) throw new Error('LLM の応答が空でした');
     diag('llm', `✅ LLM OK（${effort}）`);
     return text;
@@ -2050,6 +2101,13 @@ async function drainQueue() {
   ttsPlaying = true;
   const { original, translated, engine } = ttsQueue.shift();
   updateQueueBadge();
+
+  // 意味をなさない断片（訳が「…」）は字幕を差し替えず、読み上げもしない。ログには残す
+  if (isEmptyTranslation(translated)) {
+    addHistory(original, '…', engine);
+    drainQueue();
+    return;
+  }
 
   // メインエリアに昇格して表示
   displaySubtitle(original, translated, engine);
