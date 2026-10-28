@@ -307,6 +307,9 @@ header {
   margin-left: auto; display: flex; align-items: center; gap: 8px;
 }
 .vol-label { font-size: 12px; color: var(--text-sub); white-space: nowrap; }
+.gain-group + .vol-group { margin-left: 0; }
+.gain-group { margin-left: auto; }
+#gainLabel.clip { color: #f59e0b; font-weight: 700; }
 .vol-slider {
   width: 80px; accent-color: var(--live);
   cursor: pointer;
@@ -558,7 +561,8 @@ body.mobile .lang-route, body.mobile #modeBadge { display: none; }
 body.mobile .control-bar { padding: 8px 12px; flex-wrap: wrap; gap: 8px; }
 body.mobile #sourceToggleBtn, body.mobile #systemAudioInfo, body.mobile #micSelect, body.mobile .waveform { display: none !important; }
 body.mobile #diagText { width: 100%; order: 10; font-size: 10px !important; }
-body.mobile .vol-group { margin-left: 0; width: 100%; order: 11; }
+body.mobile .vol-group { margin-left: 0; width: 100%; order: 12; }
+body.mobile .gain-group { order: 11; }
 body.mobile .vol-slider { flex: 1 1 0; width: auto; min-width: 0; }
 body.mobile .vol-group { gap: 6px; }
 html, body { max-width: 100%; overflow-x: hidden; }
@@ -896,6 +900,11 @@ body.mobile .field input, body.mobile .field select { font-size: 16px; } /* iOS 
     <div id="levelMark" style="position:absolute;top:0;bottom:0;left:42%;width:2px;background:rgba(255,255,255,0.55);"></div>
   </div>
   <div class="status-text" id="diagText" style="color:#4a5568;font-size:11px;"></div>
+  <div class="vol-group gain-group" title="マイクの入力を増幅します（話し始めてからでも即時反映）。オレンジ色になったら音割れしているので下げてください">
+    <span class="vol-label">🎤 ゲイン</span>
+    <input type="range" class="vol-slider" id="gainSlider" min="1" max="5" step="0.5" value="1">
+    <span class="vol-label" id="gainLabel" style="font-family:'JetBrains Mono',monospace;min-width:34px;">1.0x</span>
+  </div>
   <div class="vol-group">
     <span class="vol-label" title="読み上げ速度（次の文から反映）">🗣 速度</span>
     <input type="range" class="vol-slider" id="rateSlider" min="0.7" max="2" step="0.1" value="1.1" title="読み上げ速度（次の文から反映）">
@@ -1337,6 +1346,30 @@ function setRate(r) {
 document.getElementById('rateSlider').addEventListener('input', e => setRate(e.target.value));
 setRate(currentRate);
 
+// ===== マイクのゲイン（1.0〜5.0倍。Speech に送る音声と音量メーターの両方に掛かる）=====
+const GAIN_MIN = 1, GAIN_MAX = 5;
+const clampGain = g => Math.min(GAIN_MAX, Math.max(GAIN_MIN, Math.round((parseFloat(g) || 1) * 2) / 2));
+let micGain = (() => {
+  // 優先順位: このブラウザで前回選んだ値 > 設定ファイルの micGain > 既定 1.0
+  try { const v = LS.getItem('lvMicGain'); if (v) return clampGain(v); } catch (_) {}
+  return clampGain(window.LT_CONFIG?.micGain ?? 1);
+})();
+function setGain(g) {
+  micGain = clampGain(g);
+  document.getElementById('gainSlider').value = micGain;
+  document.getElementById('gainLabel').textContent = micGain.toFixed(1) + 'x';
+  try { LS.setItem('lvMicGain', String(micGain)); } catch (_) {}
+}
+let clipUntil = 0;
+function flagClip() {
+  const el = document.getElementById('gainLabel');
+  el.classList.add('clip');
+  clipUntil = Date.now() + 1200;
+  setTimeout(() => { if (Date.now() >= clipUntil) el.classList.remove('clip'); }, 1300);
+}
+document.getElementById('gainSlider').addEventListener('input', e => setGain(e.target.value));
+setGain(micGain);
+
 // ===== Toggle =====
 async function toggleLive() {
   if (!cfg.speechKey) { openSettings(); return; }
@@ -1483,15 +1516,19 @@ async function startLiveInner(audioCtx) {
     const ch0   = e.inputBuffer.getChannelData(0);
     const numCh = e.inputBuffer.numberOfChannels;
     const int16 = new Int16Array(ch0.length);
-    let sumSq = 0;
+    const gain  = micGain;
+    let sumSq = 0, clipped = 0;
     for (let i = 0; i < ch0.length; i++) {
       let sample = ch0[i];
       if (numCh >= 2) sample = (sample + e.inputBuffer.getChannelData(1)[i]) * 0.5;
+      sample *= gain;
+      if (sample >= 1 || sample <= -1) clipped++;
       const s = Math.max(-1, Math.min(1, sample));
       sumSq += s * s;
       int16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
     }
     if (!lv) return;
+    if (gain > 1 && clipped > ch0.length * 0.005) flagClip();   // 0.5% 以上が上限に張り付いたら音割れ表示
     const ms = sumSq / ch0.length;
     const db = 10 * Math.log10(ms + 1e-12);
     paintLevel(db);
