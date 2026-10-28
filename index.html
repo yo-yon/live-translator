@@ -597,7 +597,7 @@ body.mobile .field input, body.mobile .field select { font-size: 16px; } /* iOS 
 <!-- ===== SETTINGS MODAL ===== -->
 <div class="modal-overlay" id="settingsModal">
   <div class="modal">
-    <div class="modal-title">🎙 登壇翻訳 LIVE — 設定</div>
+    <div class="modal-title">🎙 登壇翻訳 LIVE — 設定 <span id="appVersion" style="font-size:11px;font-weight:400;color:var(--text-sub);"></span></div>
     <div class="modal-sub">Speech で音声を文字にし、Foundry の LLM で自然な日本語に訳します。同じフォルダに <code>live-translator.config.js</code> があれば、その値を自動で読み込みます。ここでの変更はこのタブを閉じるまで有効です。</div>
 
     <div class="field">
@@ -1045,6 +1045,9 @@ const PRICE = {
 };
 
 // Power Platform カンファレンス向けの既定用語（英語のまま残す・認識ヒントにも使う）
+// 画面で今どの版が動いているか確認するための版番号（更新のたびに上げる）
+const APP_VERSION = '2026-10-28.4';
+{ const v = document.getElementById('appVersion'); if (v) v.textContent = `版 ${APP_VERSION}`; }
 const DEFAULT_TERMS = [
   'Power Platform', 'Power Apps', 'Power Automate', 'Power BI', 'Power Pages', 'Power Fx',
   'Copilot Studio', 'Microsoft Copilot', 'Microsoft 365 Copilot', 'Copilot', 'Dataverse',
