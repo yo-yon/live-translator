@@ -666,6 +666,14 @@ body.mobile .field input, body.mobile .field select { font-size: 16px; } /* iOS 
           </select>
         </div>
       </div>
+      <div class="field">
+        <label>途中で切れた短い発話</label>
+        <select id="mergeFragments">
+          <option value="on" selected>次の発話とつなげて訳す</option>
+          <option value="off">そのまま単独で訳す</option>
+        </select>
+        <div class="field-note">「and」「the」で終わる発話や4語以下の発話をつなげます。その部分の字幕は最大5秒遅れます</div>
+      </div>
     </div>
 
     <div class="section-title">③ 運用</div>
@@ -1018,6 +1026,7 @@ const DEFAULT_CFG = {
   reasoningEffort: 'none',   // 'none' | 'low'（none 非対応なら自動で low に切替）
   tone:         'polite',
   ctxCount:     3,
+  mergeFragments: 'on',     // 'on': 4語以下や and/the で終わる断片は次の発話とつなげて訳す
   autoStopMin:  3,          // 無音でこの分数が続いたら待機（Speech 切断・課金停止）
   resumeSens:   'mid',      // 待機からの再開の感度 'high' | 'mid' | 'low'
   standbyMaxMin: 30,        // 待機がこの分数続いたら完全停止（0 で無制限）
@@ -1233,6 +1242,7 @@ function saveSettings() {
     reasoningEffort: val('reasoningEffort'),
     tone:            val('tone'),
     ctxCount:        parseInt(val('ctxCount'), 10) || 0,
+    mergeFragments:  val('mergeFragments') === 'off' ? 'off' : 'on',
     autoStopMin:     parseInt(val('autoStopMin'), 10) || 0,
     resumeSens:      val('resumeSens'),
     standbyMaxMin:   parseInt(val('standbyMaxMin'), 10) || 0,
@@ -1278,6 +1288,7 @@ function openSettings() {
   set('reasoningEffort', cfg.reasoningEffort);
   set('tone',            cfg.tone);
   set('ctxCount',        String(cfg.ctxCount));
+  set('mergeFragments',  cfg.mergeFragments === 'off' ? 'off' : 'on');
   set('autoStopMin',     String(cfg.autoStopMin));
   set('resumeSens',      cfg.resumeSens);
   set('standbyMaxMin',   String(cfg.standbyMaxMin));
@@ -1591,6 +1602,58 @@ async function startLiveInner(audioCtx) {
   return true;
 }
 
+// ===== 途中で切れた短い発話（断片）は、次の発話とつなげてから訳す =====
+const FRAG_HOLD_MS   = 5000;  // 次の発話がこの時間来なければ、断片のまま訳す
+const FRAG_MAX_WORDS = 40;    // つなげてもこの語数を超えたら、そこで訳す
+const FRAG_TAIL = /\b(and|or|but|so|the|a|an|to|of|with|for|in|at|by|from|into|that|which|who|these|those|your|my|our|their|is|are|was|were|be|if|when|because|as|than|like|uh|um)[\s.,…-]*$/i;
+let fragBuf = null;   // { text, timer, sid }
+const wordCount = t => (t.trim().match(/\S+/g) || []).length;
+function isFragment(t) {
+  const s = t.trim();
+  if (/[?!]$/.test(s)) return false;          // 疑問文・感嘆文は短くても完結しているとみなす
+  return wordCount(s) <= 4 || FRAG_TAIL.test(s);
+}
+function clearFragment() {
+  if (fragBuf) { clearTimeout(fragBuf.timer); fragBuf = null; }
+}
+function handleLlmUtterance(text, srcCode, tgtCode) {
+  if (fragBuf && fragBuf.sid === liveSessionId) {
+    text = `${fragBuf.text} ${text}`;
+  }
+  clearFragment();
+  if (cfg.mergeFragments !== 'off' && isFragment(text) && wordCount(text) < FRAG_MAX_WORDS) {
+    const sid = liveSessionId;
+    fragBuf = {
+      text, sid,
+      timer: setTimeout(() => {
+        if (!fragBuf || fragBuf.sid !== sid) return;
+        const t = fragBuf.text;
+        fragBuf = null;
+        clearInterim();
+        if (isLive && sid === liveSessionId) dispatchLlm(t, srcCode, tgtCode);
+      }, FRAG_HOLD_MS),
+    };
+    setInterim(text);   // 訳す前の英文として薄く表示しておく
+    return;
+  }
+  dispatchLlm(text, srcCode, tgtCode);
+}
+function dispatchLlm(original, srcCode, tgtCode) {
+  // ★ 翻訳は並列に開始し、表示は発話順を守る（translationChain で直列化）
+  const context = srcHistory.slice(-cfg.ctxCount).map(h => ({ src: h.src, ja: h.ja }));
+  const hist = { src: original, ja: '' };
+  srcHistory.push(hist);
+  if (srcHistory.length > 10) srcHistory.shift();
+  const sid = liveSessionId;
+  const pending = translateWithLlm(original, context, srcCode, tgtCode);
+  pending.then(res => { if (res.engine !== 'source') hist.ja = res.text; }).catch(() => {});
+  showTranslating(original);
+  translationChain = translationChain
+    .then(() => pending)
+    .then(res => { if (isLive && sid === liveSessionId) enqueue(original, res.text, res.engine); })
+    .catch(err => console.error('translation chain error:', err));
+}
+
 // ===== Speech への接続（初回・待機からの再開・通信エラー後の再接続で共通）=====
 const PREROLL_SEC   = 2;   // 再開時に先頭へ足す直前の音声（秒）
 const RESUME_CHUNKS = 4;   // 4096サンプル×4 ≒ 0.34秒（48kHz）しきい値を超え続けたら再開
@@ -1652,7 +1715,8 @@ function connectSpeech() {
       lastSpeechAt = Date.now();
       if (!diagState.heard?.startsWith('📝')) diag('heard', '📝 認識できています');
       if (useLlm) {
-        setInterim(e.result.text);
+        // つなげ待ちの断片があれば、続けて表示する
+        setInterim(fragBuf && fragBuf.sid === liveSessionId ? `${fragBuf.text} ${e.result.text}` : e.result.text);
       } else {
         const interimTranslated = e.result.translations?.get(tgtCode);
         setInterim(interimTranslated || e.result.text, e.result.text);
@@ -1672,19 +1736,7 @@ function connectSpeech() {
     const original = e.result.text;
 
     if (useLlm) {
-      // ★ 翻訳は並列に開始し、表示は発話順を守る（translationChain で直列化）
-      const context = srcHistory.slice(-cfg.ctxCount).map(h => ({ src: h.src, ja: h.ja }));
-      const hist = { src: original, ja: '' };
-      srcHistory.push(hist);
-      if (srcHistory.length > 10) srcHistory.shift();
-      const sid = liveSessionId;
-      const pending = translateWithLlm(original, context, srcCode, tgtCode);
-      pending.then(res => { if (res.engine !== 'source') hist.ja = res.text; }).catch(() => {});
-      showTranslating(original);
-      translationChain = translationChain
-        .then(() => pending)
-        .then(res => { if (isLive && sid === liveSessionId) enqueue(original, res.text, res.engine); })
-        .catch(err => console.error('translation chain error:', err));
+      handleLlmUtterance(original, srcCode, tgtCode);
     } else {
       const translated = (srcCode === tgtCode)
         ? original
@@ -1810,6 +1862,7 @@ function resumeFromStandby() {
 
 // ===== Stop =====
 function stopLive(reason) {
+  clearFragment();
   // TTS停止
   if (currentAudio) { currentAudio.pause(); currentAudio = null; }
 
