@@ -523,7 +523,19 @@ header {
 .cam-note { color: #94a3b8; font-size: 12px; padding: 8px 16px 0; text-align: center; }
 .cam-flash { position: fixed; inset: 0; background: #fff; opacity: 0; pointer-events: none; z-index: 310; transition: opacity 0.25s; }
 .photo-view img { max-width: 100%; max-height: calc(100% - 70px); object-fit: contain; }
-.cam-view { position: relative; width: 100%; flex: 1; min-height: 0; overflow: hidden; }
+.cam-view { position: relative; width: 100%; flex: 1; min-height: 0; overflow: hidden; touch-action: none; }
+.hist-entry.note { border-left-color: #fbbf24; background: rgba(251,191,36,0.07); cursor: pointer; }
+.hist-note { font-size: 13px; color: #fde68a; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
+.memo-overlay { position: fixed; inset: 0; z-index: 320; background: rgba(7,9,15,0.75); display: none; align-items: flex-end; justify-content: center; }
+.memo-sheet { width: 100%; max-width: 640px; background: #0d1120; border: 1px solid var(--border2); border-radius: 16px 16px 0 0; padding: 16px 16px max(16px, env(safe-area-inset-bottom)); }
+.memo-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px; color: var(--text-sub); font-size: 12px; }
+.memo-head b { color: #fde68a; font-size: 14px; }
+.memo-sheet textarea { width: 100%; height: 120px; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--border2); background: rgba(255,255,255,0.05); color: var(--text); font-size: 16px; line-height: 1.5; font-family: 'Noto Sans JP', sans-serif; resize: vertical; outline: none; }
+.memo-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 10px; }
+.memo-actions button { padding: 9px 16px; border-radius: 10px; border: 1px solid var(--border2); background: transparent; color: var(--text-sub); font-size: 14px; }
+.memo-actions .memo-save { background: #fbbf24; color: #111; border-color: #fbbf24; font-weight: 700; }
+.memo-actions .memo-del { margin-right: auto; color: #fca5a5; border-color: rgba(248,113,113,0.4); }
+.memo-tip { font-size: 11px; color: #4a5568; margin-top: 6px; }
 .cam-view video { width: 100%; height: 100%; object-fit: contain; transform-origin: center center; transition: transform 0.15s; }
 .cam-tools { width: 100%; display: flex; align-items: center; justify-content: center; gap: 8px; padding: 10px 12px 0; flex-wrap: wrap; }
 .cam-tools button { padding: 7px 13px; border-radius: 18px; border: 1px solid rgba(255,255,255,0.35); background: rgba(255,255,255,0.08); color: #fff; font-size: 14px; min-width: 46px; }
@@ -547,7 +559,9 @@ body.mobile .control-bar { padding: 8px 12px; flex-wrap: wrap; gap: 8px; }
 body.mobile #sourceToggleBtn, body.mobile #systemAudioInfo, body.mobile #micSelect, body.mobile .waveform { display: none !important; }
 body.mobile #diagText { width: 100%; order: 10; font-size: 10px !important; }
 body.mobile .vol-group { margin-left: 0; width: 100%; order: 11; }
-body.mobile .vol-slider { flex: 1; width: auto; }
+body.mobile .vol-slider { flex: 1 1 0; width: auto; min-width: 0; }
+body.mobile .vol-group { gap: 6px; }
+html, body { max-width: 100%; overflow-x: hidden; }
 body.mobile .btn-toggle { padding: 12px 22px; font-size: 16px; }
 body.mobile .stage { padding: 14px 14px; }
 body.mobile .translated-text { font-size: clamp(20px, 6.2vw, 30px); }
@@ -790,6 +804,20 @@ body.mobile .field input, body.mobile .field select { font-size: 16px; } /* iOS 
   </div>
 </div>
 
+<!-- ===== MEMO ===== -->
+<div class="memo-overlay" id="memoOverlay" onclick="if (event.target === this) closeMemo()">
+  <div class="memo-sheet">
+    <div class="memo-head"><b id="memoTitle">📝 メモ</b><span id="memoTime"></span></div>
+    <textarea id="memoText" placeholder="気づき・所感・あとで調べること など"></textarea>
+    <div class="memo-tip">押した時刻の位置に入ります。翻訳は止まりません。iPhone はキーボードの音声入力を使うとマイクが取られるので、手入力してください。</div>
+    <div class="memo-actions">
+      <button class="memo-del" id="memoDel" onclick="deleteMemo()" style="display:none">削除</button>
+      <button onclick="closeMemo()">キャンセル</button>
+      <button class="memo-save" onclick="saveMemo()">保存</button>
+    </div>
+  </div>
+</div>
+
 <!-- ===== HEADER ===== -->
 <header>
   <div class="header-left">
@@ -846,6 +874,7 @@ body.mobile .field input, body.mobile .field select { font-size: 16px; } /* iOS 
 
   <!-- TTS（翻訳音声）トグル -->
   <button class="source-btn shot-btn" id="shotBtn" onclick="takeShot()" style="display:none" title="画面共有中のスライドを撮影して字幕ログに追加">📸 スクショ</button>
+  <button class="source-btn" id="memoBtn" onclick="openMemo()" title="今の時刻にメモ（所感）を追加">📝 メモ</button>
 
   <label class="tts-toggle-label" id="ttsToggleLabel" title="翻訳音声の読み上げON/OFF">
     <input type="checkbox" id="ttsToggle" checked onchange="onTtsToggle(this)">
@@ -2237,23 +2266,45 @@ function addPhotoRecord(dataUrl, source) {
   return pushRecord({ kind: 'photo', ...stampNow(), source, dataUrl });
 }
 
+// 記録を時刻順の位置に入れる（メモは書き始めた時刻なので、後から前に差し込まれることがある）
 function pushRecord(rec) {
   histCount++;
   rec.no = histCount;
-  histData.push(rec);
-  renderRecord(rec);
+  let i = histData.length;
+  while (i > 0 && (histData[i - 1].ts || 0) > (rec.ts || 0)) i--;
+  histData.splice(i, 0, rec);
+  renderRecord(rec, histData[i + 1]);
   TL.put(rec);
   return rec;
 }
 
-function renderRecord(rec) {
+function histEl(no) { return document.querySelector(`#histBody .hist-entry[data-no="${no}"]`); }
+
+function addNoteRecord(text, ts) {
+  const d = new Date(ts);
+  return pushRecord({
+    kind: 'note', ts, text,
+    time: d.toLocaleTimeString('ja-JP', { hour:'2-digit', minute:'2-digit', second:'2-digit' }),
+    date: d.toLocaleDateString('ja-JP', { year:'numeric', month:'2-digit', day:'2-digit' }),
+  });
+}
+
+function renderRecord(rec, beforeRec) {
   const body  = document.getElementById('histBody');
   const empty = body.querySelector('.hist-empty');
   if (empty) empty.remove();
   document.getElementById('histCount').textContent = histData.length;
 
   const entry = document.createElement('div');
-  if (rec.kind === 'photo') {
+  entry.dataset.no = rec.no;
+  if (rec.kind === 'note') {
+    entry.className = 'hist-entry note';
+    entry.title = 'タップで編集';
+    entry.innerHTML = `
+      <div class="hist-time">${esc(rec.time)}</div>
+      <div class="hist-content"><div class="hist-note">📝 ${esc(rec.text)}</div></div>`;
+    entry.addEventListener('click', () => openMemo(rec));
+  } else if (rec.kind === 'photo') {
     entry.className = 'hist-entry photo';
     entry.innerHTML = `
       <div class="hist-time">${esc(rec.time)}</div>
@@ -2261,7 +2312,6 @@ function renderRecord(rec) {
         <img class="hist-thumb" alt="写真 ${rec.no}" src="${rec.dataUrl}">
         <div class="hist-original">${rec.source === 'camera' ? '📷 写真' : '📸 スクショ'}</div>
       </div>`;
-    entry.dataset.no = rec.no;
     entry.querySelector('img').addEventListener('click', () => viewPhoto(rec));
   } else {
     entry.className = 'hist-entry';
@@ -2272,8 +2322,9 @@ function renderRecord(rec) {
         <div class="hist-original">${esc(rec.original)}</div>
       </div>`;
   }
-  body.appendChild(entry);
-  body.scrollTop = body.scrollHeight;
+  const ref = beforeRec ? histEl(beforeRec.no) : null;
+  if (ref) body.insertBefore(entry, ref);
+  else { body.appendChild(entry); body.scrollTop = body.scrollHeight; }
 }
 
 let viewedRec = null;
@@ -2309,7 +2360,9 @@ function rotateViewedPhoto() {
 
 function clearHistory() {
   const photos = histData.filter(r => r.kind === 'photo').length;
-  if (histData.length && !confirm(`字幕ログ${photos ? `と写真${photos}枚` : ''}を消去します。先に「レポート出力」で保存しましたか？`)) return;
+  const notes  = histData.filter(r => r.kind === 'note').length;
+  const extra  = [photos ? `写真${photos}枚` : '', notes ? `メモ${notes}件` : ''].filter(Boolean).join('・');
+  if (histData.length && !confirm(`字幕ログ${extra ? `と${extra}` : ''}を消去します。先に「レポート出力」で保存しましたか？`)) return;
   histCount = 0;
   histData  = [];
   TL.clear();
@@ -2339,6 +2392,8 @@ function downloadCSV() {
   const header = ['No', '日付', '時刻', '発話言語', '翻訳先言語', '発話テキスト', '翻訳テキスト', '翻訳方式', '種別'];
   const rows = histData.map(r => (r.kind === 'photo'
     ? [r.no, r.date, r.time, '', '', '', r.source === 'camera' ? '[写真]' : '[スクショ]', '', '写真']
+    : r.kind === 'note'
+    ? [r.no, r.date, r.time, '', '', '', r.text, '', 'メモ']
     : [r.no, r.date, r.time, r.srcLang, r.tgtLang, r.original, r.translated, r.engine || '', '字幕']
   ).map(cell).join(','));
   const csv = '﻿' + [header.map(cell).join(','), ...rows].join('\r\n');
@@ -2349,7 +2404,10 @@ function downloadCSV() {
 function buildReportHtml() {
   const first = histData[0], last = histData[histData.length - 1];
   const photos = histData.filter(r => r.kind === 'photo').length;
-  const items = histData.map(r => r.kind === 'photo'
+  const notes  = histData.filter(r => r.kind === 'note');
+  const items = histData.map(r => r.kind === 'note'
+    ? `<div class="n" id="note-${r.no}"><div class="t">${esc(r.time)}</div><div class="nt">📝 ${esc(r.text)}</div></div>`
+    : r.kind === 'photo'
     ? `<figure class="p"><div class="t">${esc(r.time)}</div><img src="${r.dataUrl}" alt="写真 ${r.no}"><figcaption>${r.source === 'camera' ? '写真' : 'スクリーンショット'}</figcaption></figure>`
     : `<div class="s"><div class="t">${esc(r.time)}</div><div><p class="ja">${esc(r.translated)}</p><p class="en">${esc(r.original)}</p></div></div>`
   ).join('\n');
@@ -2365,10 +2423,16 @@ h1{font-size:22px;margin:0 0 4px}.meta{color:#6b7280;font-size:13px;margin:0 0 2
 .p{margin:14px 0;padding:12px;background:#f8fafc;border:1px solid #e5e7eb;border-radius:10px}
 .p img{display:block;width:100%;height:auto;border-radius:6px;margin-top:6px}
 .p figcaption{font-size:12px;color:#6b7280;margin-top:6px}
+.n{display:grid;grid-template-columns:72px 1fr;gap:12px;padding:10px 12px;margin:8px 0;background:#fffbeb;border-left:4px solid #f59e0b;border-radius:6px}
+.nt{white-space:pre-wrap;font-size:15px}
+.memos{background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:12px 16px;margin:0 0 24px}
+.memos h2{font-size:15px;margin:0 0 8px}.memos ol{margin:0;padding-left:1.2em}.memos li{margin:4px 0;white-space:pre-wrap}
+.memos a{color:#92400e;text-decoration:none;font-family:ui-monospace,Menlo,monospace;font-size:12px;margin-right:6px}
 @media print{.p{break-inside:avoid}}
 </style></head><body>
 <h1>登壇翻訳ログ</h1>
-<p class="meta">${esc(first.date)} ${esc(first.time)} 〜 ${esc(last.date)} ${esc(last.time)}　／　字幕 ${histData.length - photos} 件・写真 ${photos} 枚</p>
+<p class="meta">${esc(first.date)} ${esc(first.time)} 〜 ${esc(last.date)} ${esc(last.time)}　／　字幕 ${histData.length - photos - notes.length} 件・写真 ${photos} 枚・メモ ${notes.length} 件</p>
+${notes.length ? `<section class="memos"><h2>📝 メモ一覧</h2><ol>${notes.map(n => `<li><a href="#note-${n.no}">${esc(n.time)}</a>${esc(n.text)}</li>`).join('')}</ol></section>` : ''}
 ${items}
 </body></html>`;
 }
@@ -2411,17 +2475,20 @@ const TL = (() => {
     put:   rec => run('readwrite', st => st.put(rec)),
     all:   ()  => run('readonly',  st => st.getAll()),
     clear: ()  => run('readwrite', st => st.clear()),
+    del:   no  => run('readwrite', st => st.delete(no)),
   };
 })();
 
 async function restoreTimeline() {
   const recs = await TL.all();
   if (!recs || !recs.length || histData.length) return;
-  recs.sort((a, b) => a.no - b.no);
+  recs.sort((a, b) => (a.ts || 0) - (b.ts || 0) || a.no - b.no);
   for (const r of recs) { histData.push(r); renderRecord(r); }
-  histCount = recs[recs.length - 1].no;
+  histCount = Math.max(...recs.map(r => r.no));
   const photos = recs.filter(r => r.kind === 'photo').length;
-  setStatus(`前回の字幕ログ ${recs.length - photos} 件${photos ? `・写真 ${photos} 枚` : ''}を復元しました`);
+  const notes  = recs.filter(r => r.kind === 'note').length;
+  const texts  = recs.length - photos - notes;
+  setStatus(`前回の字幕ログ ${texts} 件${photos ? `・写真 ${photos} 枚` : ''}${notes ? `・メモ ${notes} 件` : ''}を復元しました`);
 }
 
 // ===== 撮影（PC: 画面共有中のスクショ／iPhone: ページ内カメラ）=====
@@ -2539,7 +2606,7 @@ function updateCamBadge() {
   const b = document.getElementById('camBadge');
   if (!b || document.getElementById('camOverlay').style.display !== 'flex') return;
   const r = shotRotation(document.getElementById('camVideo'));
-  const z = camZoom > 1 ? `${camZoom}倍${camHwZoom ? '' : '（デジタル）'}` : '';
+  const z = camZoom > 1 ? `${camZoom.toFixed(1)}倍${camHwZoom ? '' : '（デジタル）'}` : '';
   const o = r ? '横向きで保存' : '';
   b.textContent = [z, o].filter(Boolean).join('・');
   b.style.display = b.textContent ? '' : 'none';
@@ -2554,27 +2621,66 @@ function cycleCamOrient() {
   updateCamBadge();
 }
 
-async function setCamZoom(z) {
-  camZoom = z;
-  document.querySelectorAll('.cam-zoom').forEach(b => b.classList.toggle('on', Number(b.dataset.z) === z));
-  const v = document.getElementById('camVideo');
+const DIGITAL_ZOOM_MAX = 4;
+function zoomRange() {
   const track = camStream?.getVideoTracks()[0];
   const caps = track?.getCapabilities ? track.getCapabilities() : {};
-  if (caps && caps.zoom && caps.zoom.max >= 1) {
-    // カメラ側のズーム（画質が落ちない）
-    try {
-      await track.applyConstraints({ advanced: [{ zoom: Math.min(z, caps.zoom.max) }] });
-      camHwZoom = true;
-      v.style.transform = '';
-      updateCamBadge();
-      return;
-    } catch (_) {}
+  if (caps && caps.zoom && caps.zoom.max > 1) return { hw: true, min: Math.max(1, caps.zoom.min || 1), max: caps.zoom.max, track };
+  return { hw: false, min: 1, max: DIGITAL_ZOOM_MAX, track };
+}
+function markZoomButtons() {
+  document.querySelectorAll('.cam-zoom').forEach(b => b.classList.toggle('on', Math.abs(Number(b.dataset.z) - camZoom) < 0.05));
+}
+let hwZoomBusy = false, hwZoomNext = null;
+async function applyHwZoom(track, z) {
+  // カメラ側のズームは連続で呼ぶと詰まるので、最新の値だけを順に反映する
+  hwZoomNext = z;
+  if (hwZoomBusy) return true;
+  hwZoomBusy = true;
+  try {
+    while (hwZoomNext != null) {
+      const v = hwZoomNext; hwZoomNext = null;
+      await track.applyConstraints({ advanced: [{ zoom: v }] });
+    }
+    return true;
+  } catch (_) { return false; }
+  finally { hwZoomBusy = false; }
+}
+async function setCamZoom(z) {
+  const r = zoomRange();
+  camZoom = Math.round(Math.min(r.max, Math.max(r.min, z)) * 10) / 10;
+  markZoomButtons();
+  const v = document.getElementById('camVideo');
+  if (r.hw && await applyHwZoom(r.track, camZoom)) {
+    camHwZoom = true;               // カメラ側のズーム（画質が落ちない）
+    v.style.transform = '';
+  } else {
+    camHwZoom = false;              // デジタルズーム（中央を切り出す）。プレビューも同じ倍率で拡大表示
+    v.style.transform = camZoom > 1 ? `scale(${camZoom})` : '';
   }
-  // デジタルズーム（中央を切り出す）。プレビューも同じ倍率で拡大表示
-  camHwZoom = false;
-  v.style.transform = z > 1 ? `scale(${z})` : '';
   updateCamBadge();
 }
+
+// ピンチイン・ピンチアウトで無段階ズーム
+(function setupPinch() {
+  const view = document.querySelector('.cam-view');
+  if (!view) return;
+  let startDist = 0, startZoom = 1;
+  const dist = t => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+  view.addEventListener('touchstart', e => {
+    if (e.touches.length === 2) { startDist = dist(e.touches); startZoom = camZoom; e.preventDefault(); }
+  }, { passive: false });
+  view.addEventListener('touchmove', e => {
+    if (e.touches.length === 2 && startDist > 0) {
+      e.preventDefault();
+      setCamZoom(startZoom * dist(e.touches) / startDist);
+    }
+  }, { passive: false });
+  view.addEventListener('touchend', e => { if (e.touches.length < 2) startDist = 0; });
+  // iOS Safari のページ全体の拡大（ジェスチャ）を止める
+  ['gesturestart', 'gesturechange', 'gestureend'].forEach(t =>
+    document.getElementById('camOverlay').addEventListener(t, e => e.preventDefault(), { passive: false }));
+})();
 
 async function openCamera() {
   try { camOrient = LS.getItem('lvCamOrient') || 'auto'; } catch (_) { camOrient = 'auto'; }
@@ -2640,6 +2746,52 @@ function checkMicAlive() {
     setStatus('⚠ カメラの使用でマイクが止まりました。■停止 → ▶開始 で再開してください');
     diag('audio', '⚠ マイク停止（カメラ使用後）');
   }
+}
+
+// ===== メモ（セッションの所感をタイムラインに残す）=====
+let memoEditing = null, memoTs = 0;
+function openMemo(rec) {
+  memoEditing = rec || null;
+  memoTs = rec ? rec.ts : Date.now();   // 押した時刻の位置に入れる（書いている間に進んだ字幕より前）
+  const d = new Date(memoTs);
+  document.getElementById('memoTitle').textContent = rec ? '📝 メモを編集' : '📝 メモ';
+  document.getElementById('memoTime').textContent =
+    `${d.toLocaleTimeString('ja-JP', { hour:'2-digit', minute:'2-digit', second:'2-digit' })} の位置`;
+  document.getElementById('memoDel').style.display = rec ? '' : 'none';
+  const ta = document.getElementById('memoText');
+  ta.value = rec ? rec.text : '';
+  document.getElementById('memoOverlay').style.display = 'flex';
+  setTimeout(() => ta.focus(), 50);
+}
+function closeMemo() {
+  memoEditing = null;
+  document.getElementById('memoOverlay').style.display = 'none';
+  keepAudioAlive();
+}
+function saveMemo() {
+  const text = document.getElementById('memoText').value.trim();
+  if (!text) { closeMemo(); return; }
+  if (memoEditing) {
+    memoEditing.text = text;
+    TL.put(memoEditing);
+    const el = histEl(memoEditing.no);
+    if (el) el.querySelector('.hist-note').textContent = '📝 ' + text;
+  } else {
+    addNoteRecord(text, memoTs);
+    setStatus('📝 メモを字幕ログに追加しました');
+  }
+  closeMemo();
+}
+function deleteMemo() {
+  const rec = memoEditing;
+  if (!rec || !confirm('このメモを削除しますか？')) return;
+  const i = histData.indexOf(rec);
+  if (i >= 0) histData.splice(i, 1);
+  TL.del(rec.no);
+  const el = histEl(rec.no);
+  if (el) el.remove();
+  document.getElementById('histCount').textContent = histData.length;
+  closeMemo();
 }
 
 function esc(t) {
