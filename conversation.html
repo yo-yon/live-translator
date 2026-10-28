@@ -1,0 +1,2840 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Azure AI 同時翻訳</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<!-- Azure Cognitive Services Speech SDK -->
+<!-- ★ SDK バージョン固定（ライブ版と同じ 1.52.0。会期中の自動更新で動作が変わるのを防ぐ）。更新時はこの1行を変更 -->
+<script src="https://cdn.jsdelivr.net/npm/microsoft-cognitiveservices-speech-sdk@1.52.0/distrib/browser/microsoft.cognitiveservices.speech.sdk.bundle-min.js"></script>
+<style>
+:root {
+  --bg: #06091a;
+  --surface: rgba(255,255,255,0.04);
+  --surface-hover: rgba(255,255,255,0.07);
+  --border: rgba(255,255,255,0.08);
+  --border-strong: rgba(255,255,255,0.15);
+  --text-primary: #f0f4ff;
+  --text-secondary: #8896b3;
+  --text-muted: #4a5568;
+  --a-accent: #f59e0b;
+  --a-glow: rgba(245,158,11,0.15);
+  --a-glow-strong: rgba(245,158,11,0.35);
+  --b-accent: #06b6d4;
+  --b-glow: rgba(6,182,212,0.15);
+  --b-glow-strong: rgba(6,182,212,0.35);
+  --error: #f87171;
+  --success: #34d399;
+  --warn: #fbbf24;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: 'Outfit', sans-serif;
+  background: var(--bg);
+  color: var(--text-primary);
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow-x: hidden;
+}
+
+/* Grid background */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(99,102,241,0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(99,102,241,0.04) 1px, transparent 1px);
+  background-size: 40px 40px;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* ===== MODAL ===== */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(6,9,26,0.92);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+  backdrop-filter: blur(8px);
+}
+
+.modal {
+  background: #0d1424;
+  border: 1px solid var(--border-strong);
+  border-radius: 20px;
+  padding: 36px;
+  width: 92%;
+  max-width: 440px;
+  position: relative;
+  box-shadow: 0 40px 80px rgba(0,0,0,0.6);
+}
+
+.modal-title {
+  font-size: 19px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 6px;
+}
+.modal-sub {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-bottom: 28px;
+  line-height: 1.5;
+}
+
+.field { margin-bottom: 16px; }
+.field label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+}
+.field input {
+  width: 100%;
+  padding: 11px 14px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--text-primary);
+  font-size: 14px;
+  font-family: 'JetBrains Mono', monospace;
+  outline: none;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+.field input:focus {
+  border-color: rgba(99,102,241,0.5);
+  box-shadow: 0 0 0 3px rgba(99,102,241,0.1);
+}
+.field input::placeholder { color: var(--text-muted); }
+
+.hint {
+  background: rgba(99,102,241,0.08);
+  border: 1px solid rgba(99,102,241,0.2);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 12px;
+  color: #a5b4fc;
+  line-height: 1.6;
+  margin-bottom: 20px;
+}
+
+.btn-save {
+  width: 100%;
+  padding: 13px;
+  background: linear-gradient(135deg, #4f46e5, #6366f1);
+  border: none;
+  border-radius: 12px;
+  color: white;
+  font-size: 15px;
+  font-weight: 600;
+  font-family: 'Outfit', sans-serif;
+  cursor: pointer;
+  transition: opacity 0.2s, transform 0.1s;
+  letter-spacing: 0.02em;
+}
+.btn-save:hover { opacity: 0.9; }
+.btn-save:active { transform: scale(0.98); }
+
+/* ===== HEADER ===== */
+header {
+  position: relative;
+  z-index: 10;
+  padding: 16px 28px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--border);
+  background: rgba(6,9,26,0.8);
+  backdrop-filter: blur(20px);
+}
+
+.logo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.logo-icon {
+  width: 34px; height: 34px;
+  background: linear-gradient(135deg, #4f46e5, #7c3aed);
+  border-radius: 9px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 16px;
+}
+
+.logo-text {
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+.logo-text span { color: #818cf8; }
+
+.header-badge {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  padding: 3px 8px;
+  background: rgba(99,102,241,0.15);
+  border: 1px solid rgba(99,102,241,0.3);
+  border-radius: 4px;
+  color: #818cf8;
+}
+
+.btn-settings {
+  padding: 7px 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-family: 'Outfit', sans-serif;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex; align-items: center; gap: 6px;
+}
+.btn-settings:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+  border-color: var(--border-strong);
+}
+
+/* ===== MAIN ===== */
+main {
+  position: relative;
+  z-index: 1;
+  flex: 1;
+  padding: 24px 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  max-width: 1100px;
+  width: 100%;
+  margin: 0 auto;
+}
+
+.speakers {
+  display: grid;
+  grid-template-columns: 1fr 56px 1fr;
+  gap: 0;
+  align-items: stretch;
+}
+
+/* ===== DIVIDER ===== */
+.divider {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 20px 0;
+}
+.divider-line {
+  width: 1px;
+  flex: 1;
+  background: linear-gradient(to bottom, transparent, var(--border-strong), transparent);
+}
+.divider-icon {
+  font-size: 18px;
+  opacity: 0.5;
+}
+
+/* ===== SPEAKER PANEL ===== */
+.speaker-panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  overflow: hidden;
+  transition: border-color 0.3s;
+  display: flex;
+  flex-direction: column;
+}
+
+.panel-a { border-top: 2px solid var(--a-accent); }
+.panel-b { border-top: 2px solid var(--b-accent); }
+
+.panel-a.active { border-color: var(--a-accent); box-shadow: 0 0 30px var(--a-glow); }
+.panel-b.active { border-color: var(--b-accent); box-shadow: 0 0 30px var(--b-glow); }
+
+.panel-header {
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: rgba(255,255,255,0.02);
+}
+
+.speaker-id {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+.panel-a .speaker-id { color: var(--a-accent); }
+.panel-b .speaker-id { color: var(--b-accent); }
+
+.lang-select {
+  padding: 6px 10px;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-family: 'Outfit', sans-serif;
+  cursor: pointer;
+  outline: none;
+  transition: border-color 0.2s;
+}
+.lang-select:focus { border-color: var(--border-strong); }
+.lang-select option { background: #0d1424; }
+
+.panel-body {
+  flex: 1;
+  padding: 24px 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+}
+
+/* ===== STATUS BADGE ===== */
+.status-badge {
+  height: 26px;
+  padding: 0 12px;
+  border-radius: 13px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.2s;
+  border: 1px solid transparent;
+}
+.status-badge.idle {
+  background: rgba(255,255,255,0.05);
+  border-color: var(--border);
+  color: var(--text-muted);
+}
+.status-badge.recording {
+  background: rgba(239,68,68,0.12);
+  border-color: rgba(239,68,68,0.3);
+  color: #f87171;
+}
+.status-badge.processing {
+  background: rgba(251,191,36,0.12);
+  border-color: rgba(251,191,36,0.3);
+  color: #fbbf24;
+}
+.status-badge.speaking {
+  background: rgba(52,211,153,0.12);
+  border-color: rgba(52,211,153,0.3);
+  color: #34d399;
+}
+
+.dot {
+  width: 5px; height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.dot.blink { animation: blink 0.9s ease-in-out infinite; }
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.15} }
+
+/* ===== MIC BUTTON ===== */
+.mic-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.mic-ripple {
+  position: absolute;
+  width: 88px; height: 88px;
+  border-radius: 50%;
+  border: 2px solid currentColor;
+  opacity: 0;
+  transform: scale(0.8);
+}
+.panel-a .mic-ripple { color: var(--a-accent); }
+.panel-b .mic-ripple { color: var(--b-accent); }
+
+.mic-ripple.active {
+  animation: ripple 1.5s ease-out infinite;
+}
+@keyframes ripple {
+  0% { transform: scale(0.8); opacity: 0.7; }
+  100% { transform: scale(1.8); opacity: 0; }
+}
+
+.mic-btn {
+  width: 80px; height: 80px;
+  border-radius: 50%;
+  border: none;
+  cursor: pointer;
+  font-size: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s;
+  position: relative;
+  z-index: 1;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.panel-a .mic-btn {
+  background: linear-gradient(145deg, #b45309, #d97706, #f59e0b);
+  box-shadow: 0 4px 20px rgba(245,158,11,0.3);
+}
+.panel-b .mic-btn {
+  background: linear-gradient(145deg, #0e7490, #0891b2, #06b6d4);
+  box-shadow: 0 4px 20px rgba(6,182,212,0.3);
+}
+
+.mic-btn:hover { filter: brightness(1.1); }
+.mic-btn:active, .mic-btn.recording { transform: scale(0.92); }
+.panel-a .mic-btn.recording { box-shadow: 0 4px 30px var(--a-glow-strong); }
+.panel-b .mic-btn.recording { box-shadow: 0 4px 30px var(--b-glow-strong); }
+
+.mic-hint {
+  font-size: 12px;
+  color: var(--text-muted);
+  text-align: center;
+  line-height: 1.4;
+}
+
+/* ===== TRANSCRIPT ===== */
+.transcript-area {
+  width: 100%;
+  background: rgba(0,0,0,0.3);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px;
+  min-height: 100px;
+  max-height: 260px;      /* 長文時はパネルを伸ばさずスクロール */
+  overflow-y: auto;
+  flex: 1;
+  transition: border-color 0.2s;
+}
+
+.tr-label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+.tr-original {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+.tr-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 10px 0;
+}
+.tr-translated {
+  font-size: 15px;
+  color: var(--text-primary);
+  font-weight: 500;
+  line-height: 1.6;
+}
+.tr-empty {
+  color: var(--text-muted);
+  font-size: 13px;
+  text-align: center;
+  padding: 16px 0;
+}
+
+/* ===== LOG ===== */
+.log-section {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  overflow: hidden;
+}
+
+.log-header {
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: rgba(255,255,255,0.02);
+}
+.log-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.log-count {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  padding: 2px 7px;
+  background: rgba(255,255,255,0.06);
+  border-radius: 4px;
+  color: var(--text-muted);
+}
+
+.btn-clear {
+  font-size: 12px;
+  padding: 5px 10px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-family: 'Outfit', sans-serif;
+  transition: all 0.2s;
+}
+.btn-clear:hover { border-color: var(--border-strong); color: var(--text-secondary); }
+
+.log-body {
+  max-height: 220px;
+  overflow-y: auto;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.log-empty {
+  color: var(--text-muted);
+  font-size: 13px;
+  text-align: center;
+  padding: 28px;
+}
+
+.log-entry {
+  padding: 12px 14px;
+  border-radius: 10px;
+  border-left: 3px solid transparent;
+  animation: fadeIn 0.3s ease;
+}
+@keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+
+.log-entry.from-a {
+  background: rgba(245,158,11,0.07);
+  border-color: var(--a-accent);
+}
+.log-entry.from-b {
+  background: rgba(6,182,212,0.07);
+  border-color: var(--b-accent);
+}
+.log-original { font-size: 12px; color: var(--text-secondary); line-height: 1.5; }
+.log-translated { font-size: 14px; color: var(--text-primary); margin-top: 4px; line-height: 1.5; }
+.log-meta {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-top: 6px;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 2px; }
+
+/* ===== SOURCE TOGGLE ===== */
+.source-toggle {
+  display: flex;
+  align-items: center;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.source-toggle-btn {
+  padding: 5px 9px;
+  font-size: 11px;
+  font-family: 'Outfit', sans-serif;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+.source-toggle-btn:hover { color: var(--text-secondary); background: rgba(255,255,255,0.04); }
+.source-toggle-btn.active-mic  { background: rgba(245,158,11,0.15); color: var(--a-accent); }
+.source-toggle-btn.active-sys  { background: rgba(99,102,241,0.15); color: #818cf8; }
+.panel-b .source-toggle-btn.active-mic { background: rgba(6,182,212,0.15); color: var(--b-accent); }
+
+.sys-info-badge {
+  font-size: 10px;
+  color: #6366f1;
+  font-family: 'JetBrains Mono', monospace;
+  padding: 3px 7px;
+  background: rgba(99,102,241,0.08);
+  border: 1px solid rgba(99,102,241,0.2);
+  border-radius: 6px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+/* 共有ストリーム保持中はグリーン表示＋クリックで解放 */
+.sys-info-badge.sharing {
+  color: var(--success);
+  background: rgba(52,211,153,0.08);
+  border-color: rgba(52,211,153,0.25);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.sys-info-badge.sharing:hover { background: rgba(52,211,153,0.16); }
+
+/* ===== MULTI-LANG MODE ===== */
+.mode-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+.mode-tab {
+  flex: 1;
+  padding: 10px 16px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-family: 'Outfit', sans-serif;
+  font-size: 14px;
+  font-weight: 600;
+  transition: all 0.2s;
+}
+.mode-tab:hover { color: var(--text-secondary); }
+.mode-tab.active {
+  color: var(--text-primary);
+  border-color: #a78bfa;
+  background: rgba(167,139,250,0.08);
+}
+
+.panel-m { border-top: 2px solid #a78bfa; margin-bottom: 20px; }
+.panel-m.active { border-color: #a78bfa; box-shadow: 0 0 30px rgba(167,139,250,0.25); }
+.panel-m .speaker-id { color: #a78bfa; }
+.panel-m .mic-ripple { color: #a78bfa; }
+.panel-m .mic-btn {
+  background: linear-gradient(145deg, #6d28d9, #7c3aed, #a78bfa);
+  box-shadow: 0 4px 20px rgba(167,139,250,0.3);
+}
+.panel-m .mic-btn.recording { box-shadow: 0 4px 30px rgba(167,139,250,0.5); }
+.panel-m .source-toggle-btn.active-mic { background: rgba(167,139,250,0.15); color: #a78bfa; }
+.panel-m .source-toggle-btn.active-sys { background: rgba(167,139,250,0.15); color: #a78bfa; }
+.source-toggle-btn.active-mix { background: rgba(167,139,250,0.15); color: #a78bfa; }
+.log-entry.from-m {
+  background: rgba(167,139,250,0.07);
+  border-color: #a78bfa;
+}
+
+/* 参加言語チップ */
+.lang-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: center;
+  margin: 4px 0 12px;
+}
+.lang-chip {
+  font-size: 12px;
+  padding: 5px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  cursor: pointer;
+  color: var(--text-muted);
+  user-select: none;
+  transition: all 0.15s;
+}
+.lang-chip:hover { border-color: var(--border-strong); }
+.lang-chip input { display: none; }
+.lang-chip:has(input:checked) {
+  border-color: #a78bfa;
+  color: #ede9fe;
+  background: rgba(167,139,250,0.14);
+}
+
+/* 多言語結果行 */
+.ml-row {
+  padding: 8px 10px;
+  border-left: 3px solid var(--border);
+  margin-bottom: 8px;
+  background: rgba(255,255,255,0.02);
+  border-radius: 0 8px 8px 0;
+}
+.ml-detected { border-left-color: #a78bfa; }
+.ml-lang {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+.ml-text { font-size: 14px; line-height: 1.6; }
+
+/* ===== COPY BUTTON ===== */
+.btn-copy {
+  font-size: 11px;
+  padding: 3px 8px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-family: 'Outfit', sans-serif;
+  transition: all 0.15s;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.btn-copy:hover { border-color: var(--border-strong); color: var(--text-secondary); }
+.btn-copy.copied { border-color: rgba(52,211,153,0.4); color: var(--success); }
+
+/* ログ行のコピーボタン（ホバーで表示） */
+.log-entry { position: relative; }
+.log-entry .btn-copy {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  opacity: 0;
+  background: rgba(13,20,36,0.85);
+}
+.log-entry:hover .btn-copy { opacity: 1; }
+/* タッチデバイスでは常時表示 */
+@media (hover: none) {
+  .log-entry .btn-copy { opacity: 1; }
+}
+
+/* ===== RESPONSIVE ===== */
+@media (max-width: 680px) {
+  .speakers {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto auto auto;
+  }
+  .divider {
+    flex-direction: row;
+    height: 40px;
+    padding: 0;
+  }
+  .divider-line {
+    width: 100%;
+    height: 1px;
+    background: linear-gradient(to right, transparent, var(--border-strong), transparent);
+    flex: 1;
+  }
+  main { padding: 16px; }
+  header { padding: 12px 16px; }
+  .header-badge { display: none; }
+}
+
+/* ===== 設定画面（LLM 翻訳の項目など） ===== */
+.modal { max-height: 92vh; overflow-y: auto; }
+.modal code { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #a5b4fc; }
+.section-title {
+  font-size: 12px; font-weight: 700; color: #a5b4fc;
+  margin: 20px 0 10px; padding-top: 14px; border-top: 1px solid var(--border);
+}
+.field select, .field textarea {
+  width: 100%;
+  padding: 10px 13px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-family: 'Outfit', sans-serif;
+  outline: none;
+}
+.field select { cursor: pointer; }
+.field select option { background: #0d1424; }
+.field textarea { font-family: 'JetBrains Mono', monospace; font-size: 12px; resize: vertical; min-height: 64px; }
+.field-note { font-size: 11px; color: var(--text-secondary); margin-top: 5px; line-height: 1.5; }
+.field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px; }
+.field-row .field { margin-bottom: 0; }
+.check-label { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-primary); cursor: pointer; }
+.check-label input { accent-color: #6366f1; width: 16px; height: 16px; }
+
+/* ===== ヘッダー右側・費用・診断 ===== */
+.header-right { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.cost-badge {
+  font-family: 'JetBrains Mono', monospace; font-size: 11px;
+  padding: 5px 9px; border-radius: 8px; cursor: pointer;
+  background: var(--surface); border: 1px solid var(--border); color: var(--text-secondary);
+  white-space: nowrap;
+}
+.cost-badge.warn { color: var(--warn); border-color: rgba(251,191,36,0.4); background: rgba(251,191,36,0.08); }
+.diag-line {
+  font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--text-muted);
+  min-height: 14px; margin: -8px 2px 0; word-break: break-all;
+}
+.engine-mark { color: var(--warn); font-size: 10px; text-transform: none; letter-spacing: 0; }
+#faceBtn { display: none; }
+#faceBtn.on { border-color: rgba(245,158,11,0.6); color: var(--a-accent); }
+
+/* ===== iPhone版（body.mobile）: 1台を2人で使う上下2分割 ===== */
+body.mobile header { padding: 8px 10px; gap: 6px; flex-wrap: wrap; }
+body.mobile .header-badge, body.mobile .logo-text span { display: none; }
+body.mobile .logo-icon { width: 28px; height: 28px; font-size: 14px; }
+body.mobile .btn-settings { padding: 6px 8px; font-size: 14px; }
+body.mobile .lbl { display: none; }
+body.mobile header { flex-wrap: nowrap; }
+body.mobile .header-right { gap: 5px; flex-wrap: nowrap; }
+body.mobile .cost-badge { padding: 5px 7px; font-size: 10px; }
+body.mobile #faceBtn { display: flex; }
+body.mobile main { padding: 10px; gap: 10px; }
+body.mobile .mode-tabs { margin-bottom: 0; }
+body.mobile .mode-tab { padding: 8px 10px; font-size: 13px; }
+body.mobile .speakers { grid-template-columns: 1fr; grid-template-rows: auto auto auto; }
+body.mobile .divider { flex-direction: row; height: 22px; padding: 0; }
+body.mobile .divider-line { width: 100%; height: 1px; flex: 1; background: linear-gradient(to right, transparent, var(--border-strong), transparent); }
+body.mobile .source-toggle, body.mobile .sys-info-badge,
+body.mobile #micA, body.mobile #micB, body.mobile #micM { display: none !important; }
+body.mobile .panel-header { padding: 8px 12px; }
+body.mobile .panel-body {
+  padding: 10px 12px; gap: 10px;
+  display: grid; grid-template-columns: auto 1fr; grid-template-rows: auto auto 1fr; align-items: center;
+}
+body.mobile .panel-body .status-badge { grid-column: 1; grid-row: 1; justify-self: center; }
+body.mobile .panel-body .mic-wrapper  { grid-column: 1; grid-row: 2 / span 2; align-self: start; }
+body.mobile .panel-body .mic-hint     { display: none; }
+body.mobile .panel-body .transcript-area { grid-column: 2; grid-row: 1 / span 3; align-self: stretch; }
+body.mobile .panel-m .panel-body { grid-template-rows: auto auto auto 1fr; }
+body.mobile .panel-m .lang-chips { grid-column: 1 / span 2; grid-row: 1; margin: 0; }
+body.mobile .panel-m .status-badge { grid-row: 2; }
+body.mobile .panel-m .mic-wrapper { grid-row: 3 / span 2; }
+body.mobile .panel-m .transcript-area { grid-row: 2 / span 3; }
+body.mobile .mic-btn { width: 68px; height: 68px; font-size: 24px; }
+body.mobile .mic-ripple { width: 74px; height: 74px; }
+body.mobile .transcript-area { min-height: 120px; max-height: 32vh; padding: 10px 12px; }
+body.mobile .tr-translated { font-size: 17px; }
+body.mobile .log-body { max-height: 30vh; }
+body.mobile .modal { padding: 22px 18px; width: 96%; }
+body.mobile .field-row { grid-template-columns: 1fr; }
+body.mobile .field input, body.mobile .field select, body.mobile .field textarea { font-size: 16px; } /* iOS の自動ズーム防止 */
+/* 向かい合わせ: 上側（話者A＝相手側）を180度回転して、テーブルの向こうから読めるようにする */
+body.mobile.face .panel-a { transform: rotate(180deg); }
+</style>
+</head>
+<body>
+
+<!-- ===== SETTINGS MODAL ===== -->
+<div class="modal-overlay" id="settingsModal">
+  <div class="modal">
+    <div class="modal-title">⚙️ 対話翻訳 — 設定 <span id="appVersion" style="font-size:11px;font-weight:400;color:var(--text-secondary);"></span></div>
+    <div class="modal-sub">Speech で音声を文字にし、Foundry の LLM で自然な訳にします。同じフォルダに <code>live-translator.config.js</code> があれば、その値を自動で読み込みます（ライブ版と共用）。</div>
+
+    <div class="field">
+      <label>翻訳エンジン</label>
+      <select id="engine" onchange="updateEngineFields()">
+        <option value="llm" selected>LLM（自然な訳・推奨）</option>
+        <option value="nmt">Speech 翻訳（従来方式・保険）</option>
+      </select>
+      <div class="field-note">LLM：音声認識のみ＋gpt で翻訳（訳が出るまで1〜2秒長くなります）。Speech 翻訳：直訳寄りだが、LLM が不調なときの保険。</div>
+    </div>
+
+    <div class="section-title">① Azure Speech（音声認識・読み上げ）</div>
+    <div class="field">
+      <label>Azure Speech リソースキー</label>
+      <input type="password" id="speechKey" placeholder="xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" autocomplete="off">
+    </div>
+    <div class="field">
+      <label>Azure Speech リージョン</label>
+      <input type="text" id="speechRegion" placeholder="eastus" value="eastus" autocapitalize="off" autocorrect="off">
+      <div class="field-note">リソースの「場所」と同じにします（ygl-ai-translator は East US なので <code>eastus</code>）。違うと接続エラー 1006 になります。</div>
+    </div>
+
+    <div id="llmFields">
+      <div class="section-title">② Foundry（LLM 翻訳）</div>
+      <div class="field">
+        <label>エンドポイント</label>
+        <input type="text" id="aoaiEndpoint" placeholder="https://proj-livetrans-resource.openai.azure.com" autocapitalize="off" autocorrect="off">
+        <div class="field-note">リソース名だけでも可。プロジェクト エンドポイント（…services.ai.azure.com/api/projects/…）ではありません</div>
+      </div>
+      <div class="field">
+        <label>Foundry キー</label>
+        <input type="password" id="aoaiKey" placeholder="xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" autocomplete="off">
+      </div>
+      <div class="field-row">
+        <div class="field">
+          <label>デプロイ名</label>
+          <input type="text" id="aoaiDeployment" placeholder="gpt-5.4-mini" value="gpt-5.4-mini" autocapitalize="off" autocorrect="off">
+        </div>
+        <div class="field">
+          <label>推論の強さ</label>
+          <select id="reasoningEffort">
+            <option value="none" selected>なし（最速）</option>
+            <option value="low">低</option>
+          </select>
+        </div>
+      </div>
+      <div class="field-row">
+        <div class="field">
+          <label>日本語訳の口調</label>
+          <select id="tone">
+            <option value="polite" selected>です・ます調</option>
+            <option value="plain">だ・である調</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>文脈として渡す直前の発話</label>
+          <select id="ctxCount">
+            <option value="0">0（最安）</option>
+            <option value="2">2件</option>
+            <option value="3" selected>3件</option>
+            <option value="5">5件</option>
+          </select>
+        </div>
+      </div>
+      <div class="field">
+        <label>訳さない語（製品名など・1行に1つ）</label>
+        <textarea id="termsInput" rows="3" placeholder="Power Platform などの既定の製品名に追加する語"></textarea>
+        <div class="field-note">Power Platform・Copilot Studio などの製品名は、入力しなくても英語のまま残します</div>
+      </div>
+    </div>
+
+    <div class="section-title">③ 読み上げ・費用</div>
+    <div class="field-row">
+      <div class="field">
+        <label>読み上げエンジン</label>
+        <select id="ttsEngine">
+          <option value="browser">ブラウザ内蔵（低遅延）</option>
+          <option value="azure">Azure Neural（高品質）</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>読み上げ速度</label>
+        <select id="ttsRate">
+          <option value="0.8">0.8倍</option>
+          <option value="0.9">0.9倍</option>
+          <option value="1">1.0倍</option>
+          <option value="1.1">1.1倍</option>
+          <option value="1.2">1.2倍</option>
+          <option value="1.4">1.4倍</option>
+          <option value="1.6">1.6倍</option>
+          <option value="2">2.0倍</option>
+        </select>
+      </div>
+    </div>
+    <div class="field">
+      <label>費用の警告（円・対話版の累計）</label>
+      <input type="number" id="budgetWarn" value="5000" min="0" step="1000">
+    </div>
+
+    <div class="section-title">④ この端末への保存</div>
+    <label class="check-label">
+      <input type="checkbox" id="rememberKeys"> この端末にキーと設定を保存（次回から入力不要）
+    </label>
+    <div class="field-note" style="margin:6px 0 20px;">キーはライブ版と共通の保存場所に入るので、ライブ版で iPhone に保存したキーもそのまま使えます。チェックを外して保存すると、この端末に保存したキーを消去します（ライブ版でも消えます）。</div>
+
+    <button class="btn-save" onclick="saveSettings()">保存して開始 →</button>
+  </div>
+</div>
+
+<!-- ===== HEADER ===== -->
+<header>
+  <div class="logo">
+    <div class="logo-icon">🌐</div>
+    <div class="logo-text">Azure AI <span>同時翻訳</span></div>
+    <div class="header-badge" id="engineBadge">Speech + LLM</div>
+  </div>
+  <div class="header-right">
+    <span class="cost-badge" id="costBadge" onclick="resetCostTotal()" title="概算費用（クリックで累計を0に戻す）">💴 ¥0</span>
+    <button class="btn-settings" id="faceBtn" onclick="toggleFace()" title="上側（話者A）を180度回転して、向かいの相手が読めるようにする">↕ 向かい合わせ</button>
+    <button class="btn-settings" id="ttsToggleBtn" onclick="toggleTtsEnabled()" title="翻訳後の音声読み上げのオン/オフ">🔊 読み上げON</button>
+    <button class="btn-settings" id="uiModeBtn" onclick="toggleUiMode()" title="PC版 / iPhone版 を切り替え">🖥 PC版</button>
+    <button class="btn-settings" id="settingsBtn" onclick="openSettings()" title="設定">⚙️<span class="lbl"> 設定</span></button>
+  </div>
+</header>
+
+<!-- ===== MAIN ===== -->
+<main>
+  <!-- モード切替タブ -->
+  <div class="mode-tabs">
+    <button class="mode-tab active" id="tabPair" onclick="switchMode('pair')">👥 2話者<span class="lbl">モード</span></button>
+    <button class="mode-tab" id="tabMulti" onclick="switchMode('multi')">🌏 多言語<span class="lbl">モード（最大4言語）</span></button>
+  </div>
+  <div class="diag-line" id="diagText"></div>
+
+  <div class="speakers">
+
+    <!-- Person A -->
+    <div class="speaker-panel panel-a" id="panelA">
+      <div class="panel-header">
+        <span class="speaker-id">👤 話者 A</span>
+        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end">
+          <!-- ソース切り替え -->
+          <div class="source-toggle" id="sourceToggleA">
+            <button class="source-toggle-btn active-mic" id="srcMicBtnA" onclick="setSource('A','mic')" title="マイク入力">🎤 マイク</button>
+            <button class="source-toggle-btn" id="srcSysBtnA" onclick="setSource('A','system')" title="システム音声（YouTube・Teams等）">🖥 システム</button>
+          </div>
+          <!-- マイク選択（マイクモード時のみ表示） -->
+          <select class="lang-select" id="micA" title="マイク選択" style="max-width:130px;font-size:11px">
+            <option value="">🎤 デフォルト</option>
+          </select>
+          <!-- システム音声時の案内 -->
+          <span class="sys-info-badge" id="sysInfoA" style="display:none;" onclick="stopShare('A')">画面共有で音声を選択</span>
+          <select class="lang-select" id="langA">
+            <option value="ja-JP">🇯🇵 日本語</option>
+            <option value="en-US" selected>🇺🇸 English</option>
+            <option value="zh-CN">🇨🇳 中文(简体)</option>
+            <option value="ko-KR">🇰🇷 한국어</option>
+            <option value="fr-FR">🇫🇷 Français</option>
+            <option value="es-ES">🇪🇸 Español</option>
+            <option value="de-DE">🇩🇪 Deutsch</option>
+            <option value="pt-BR">🇧🇷 Português</option>
+            <option value="ar-SA">🇸🇦 العربية</option>
+            <option value="it-IT">🇮🇹 Italiano</option>
+          </select>
+        </div>
+      </div>
+      <div class="panel-body">
+        <div class="status-badge idle" id="statusA">
+          <div class="dot"></div> 待機中
+        </div>
+        <div class="mic-wrapper">
+          <div class="mic-ripple" id="rippleA"></div>
+          <button class="mic-btn" id="micBtnA" onclick="toggleRec('A')">🎤</button>
+        </div>
+        <div class="mic-hint" id="hintA">ボタンを押して録音開始<br>もう一度押すと翻訳・読み上げ</div>
+        <div class="transcript-area" id="transcriptA">
+          <div class="tr-empty">マイクボタンを押して<br>話し始めてください</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Divider -->
+    <div class="divider">
+      <div class="divider-line"></div>
+      <div class="divider-icon">⇄</div>
+      <div class="divider-line"></div>
+    </div>
+
+    <!-- Person B -->
+    <div class="speaker-panel panel-b" id="panelB">
+      <div class="panel-header">
+        <span class="speaker-id">👤 話者 B</span>
+        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end">
+          <!-- ソース切り替え -->
+          <div class="source-toggle" id="sourceToggleB">
+            <button class="source-toggle-btn active-mic" id="srcMicBtnB" onclick="setSource('B','mic')" title="マイク入力">🎤 マイク</button>
+            <button class="source-toggle-btn" id="srcSysBtnB" onclick="setSource('B','system')" title="システム音声（YouTube・Teams等）">🖥 システム</button>
+          </div>
+          <!-- マイク選択（マイクモード時のみ表示） -->
+          <select class="lang-select" id="micB" title="マイク選択" style="max-width:130px;font-size:11px">
+            <option value="">🎤 デフォルト</option>
+          </select>
+          <!-- システム音声時の案内 -->
+          <span class="sys-info-badge" id="sysInfoB" style="display:none;" onclick="stopShare('B')">画面共有で音声を選択</span>
+          <select class="lang-select" id="langB">
+            <option value="ja-JP" selected>🇯🇵 日本語</option>
+            <option value="en-US">🇺🇸 English</option>
+            <option value="zh-CN">🇨🇳 中文(简体)</option>
+            <option value="ko-KR">🇰🇷 한국어</option>
+            <option value="fr-FR">🇫🇷 Français</option>
+            <option value="es-ES">🇪🇸 Español</option>
+            <option value="de-DE">🇩🇪 Deutsch</option>
+            <option value="pt-BR">🇧🇷 Português</option>
+            <option value="ar-SA">🇸🇦 العربية</option>
+            <option value="it-IT">🇮🇹 Italiano</option>
+          </select>
+        </div>
+      </div>
+      <div class="panel-body">
+        <div class="status-badge idle" id="statusB">
+          <div class="dot"></div> 待機中
+        </div>
+        <div class="mic-wrapper">
+          <div class="mic-ripple" id="rippleB"></div>
+          <button class="mic-btn" id="micBtnB" onclick="toggleRec('B')">🎤</button>
+        </div>
+        <div class="mic-hint" id="hintB">ボタンを押して録音開始<br>もう一度押すと翻訳・読み上げ</div>
+        <div class="transcript-area" id="transcriptB">
+          <div class="tr-empty">マイクボタンを押して<br>話し始めてください</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 多言語モードパネル -->
+  <div class="speaker-panel panel-m" id="panelM" style="display:none;">
+    <div class="panel-header">
+      <span class="speaker-id">🌏 多言語モード</span>
+      <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end">
+        <!-- ソース切り替え -->
+        <div class="source-toggle" id="sourceToggleM">
+          <button class="source-toggle-btn active-mic" id="srcMicBtnM" onclick="setSource('M','mic')" title="マイク入力（対面）">🎤 マイク</button>
+          <button class="source-toggle-btn" id="srcSysBtnM" onclick="setSource('M','system')" title="システム音声のみ（相手の声だけ拾う）">🖥 システム</button>
+          <button class="source-toggle-btn" id="srcMixBtnM" onclick="setSource('M','mix')" title="マイク+システム音声（Teams会議で自分と相手の両方を拾う）">🎧 ミックス</button>
+        </div>
+        <!-- マイク選択（マイクモード時のみ表示） -->
+        <select class="lang-select" id="micM" title="マイク選択" style="max-width:130px;font-size:11px">
+          <option value="">🎤 デフォルト</option>
+        </select>
+        <!-- システム音声時の案内 -->
+        <span class="sys-info-badge" id="sysInfoM" style="display:none;" onclick="stopShare('M')">画面共有で音声を選択</span>
+        <!-- 読み上げ言語（デフォルト: なし） -->
+        <select class="lang-select" id="ttsLangM" title="翻訳結果を読み上げる言語">
+          <option value="">🔇 読み上げなし</option>
+        </select>
+      </div>
+    </div>
+    <div class="panel-body">
+      <!-- 参加言語の選択（最大4言語 = 言語自動判定の上限） -->
+      <div class="lang-chips" id="langChips">
+        <label class="lang-chip"><input type="checkbox" value="ja-JP" checked onchange="toggleMultiLang(this)">🇯🇵 日本語</label>
+        <label class="lang-chip"><input type="checkbox" value="en-US" checked onchange="toggleMultiLang(this)">🇺🇸 English</label>
+        <label class="lang-chip"><input type="checkbox" value="zh-CN" onchange="toggleMultiLang(this)">🇨🇳 中文(简体)</label>
+        <label class="lang-chip"><input type="checkbox" value="ko-KR" onchange="toggleMultiLang(this)">🇰🇷 한국어</label>
+        <label class="lang-chip"><input type="checkbox" value="fr-FR" onchange="toggleMultiLang(this)">🇫🇷 Français</label>
+        <label class="lang-chip"><input type="checkbox" value="es-ES" onchange="toggleMultiLang(this)">🇪🇸 Español</label>
+        <label class="lang-chip"><input type="checkbox" value="de-DE" onchange="toggleMultiLang(this)">🇩🇪 Deutsch</label>
+        <label class="lang-chip"><input type="checkbox" value="pt-BR" onchange="toggleMultiLang(this)">🇧🇷 Português</label>
+        <label class="lang-chip"><input type="checkbox" value="ar-SA" onchange="toggleMultiLang(this)">🇸🇦 العربية</label>
+        <label class="lang-chip"><input type="checkbox" value="it-IT" onchange="toggleMultiLang(this)">🇮🇹 Italiano</label>
+      </div>
+      <div class="status-badge idle" id="statusM">
+        <div class="dot"></div> 待機中
+      </div>
+      <div class="mic-wrapper">
+        <div class="mic-ripple" id="rippleM"></div>
+        <button class="mic-btn" id="micBtnM" onclick="toggleRec('M')">🎤</button>
+      </div>
+      <div class="mic-hint" id="hintM">話す人がボタンを押して発話 → もう一度押すと<br>言語を自動判定し、他の参加言語すべてへ翻訳</div>
+      <div class="transcript-area" id="transcriptM">
+        <div class="tr-empty">参加言語を選んで（2〜4言語）<br>録音を開始してください</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Log -->
+  <div class="log-section">
+    <div class="log-header">
+      <div class="log-title">
+        📝 会話ログ
+        <span class="log-count" id="logCount">0</span>
+      </div>
+      <div style="display:flex;gap:6px">
+        <button class="btn-clear" onclick="downloadCSV()">CSV出力</button>
+        <button class="btn-clear" onclick="clearLog()">クリア</button>
+      </div>
+    </div>
+    <div class="log-body" id="logBody">
+      <div class="log-empty">会話を開始すると、ここに履歴が表示されます</div>
+    </div>
+  </div>
+</main>
+
+<!-- 同じフォルダの設定ファイル（ライブ版と共用。なければ無視されます） -->
+<script src="live-translator.config.js" onerror="window.LT_CONFIG_MISSING = true"></script>
+<script>
+// ===== 版番号（画面で今どの版が動いているか確認するため。更新のたびに上げる）=====
+const APP_VERSION = '2026-10-28.1';
+
+// ===== 保存領域（使えない環境ではメモリ上で代替し、起動を止めない）=====
+function safeStorage(kind) {
+  try {
+    const st = window[kind];
+    st.setItem('__az_probe', '1'); st.removeItem('__az_probe');
+    return st;
+  } catch (_) {
+    const m = new Map();
+    return {
+      getItem: k => (m.has(k) ? m.get(k) : null),
+      setItem: (k, v) => { m.set(k, String(v)); },
+      removeItem: k => { m.delete(k); },
+    };
+  }
+}
+const SS = safeStorage('sessionStorage');
+const LS = safeStorage('localStorage');
+const readJson = (st, k) => { try { return JSON.parse(st.getItem(k) || 'null'); } catch (_) { return null; } };
+
+// ===== Language config =====
+const LANGS = {
+  'ja-JP': { name: '日本語',      voice: 'ja-JP-NanamiNeural',    tc: 'ja'      },
+  'en-US': { name: 'English',     voice: 'en-US-JennyNeural',     tc: 'en'      },
+  'zh-CN': { name: '中文(简体)',   voice: 'zh-CN-XiaoxiaoNeural',  tc: 'zh-Hans' },
+  'ko-KR': { name: '한국어',       voice: 'ko-KR-SunHiNeural',     tc: 'ko'      },
+  'fr-FR': { name: 'Français',    voice: 'fr-FR-DeniseNeural',    tc: 'fr'      },
+  'es-ES': { name: 'Español',     voice: 'es-ES-ElviraNeural',    tc: 'es'      },
+  'de-DE': { name: 'Deutsch',     voice: 'de-DE-KatjaNeural',     tc: 'de'      },
+  'pt-BR': { name: 'Português',   voice: 'pt-BR-FranciscaNeural', tc: 'pt'      },
+  'ar-SA': { name: 'العربية',      voice: 'ar-SA-ZariyahNeural',   tc: 'ar'      },
+  'it-IT': { name: 'Italiano',    voice: 'it-IT-ElsaNeural',      tc: 'it'      },
+};
+const tcOf   = loc => LANGS[loc]?.tc || String(loc).split('-')[0];
+const nameOf = loc => LANGS[loc]?.name || loc;
+
+// ===== Config =====
+const DEFAULT_CFG = {
+  engine:          'llm',        // 'llm'（Speech は認識のみ＋LLM翻訳） | 'nmt'（Speech 翻訳・従来）
+  speechKey:       '',
+  speechRegion:    'eastus',
+  ttsEngine:       'browser',    // 'browser' | 'azure'
+  aoaiEndpoint:    '',
+  aoaiKey:         '',
+  aoaiDeployment:  'gpt-5.4-mini',
+  reasoningEffort: 'none',       // 'none' | 'low'（none 非対応なら自動で low に切替）
+  tone:            'polite',
+  ctxCount:        3,
+  budgetWarn:      5000,
+};
+// ライブ版と共通の保存場所（localStorage 'lvSavedCfg'）でやり取りする項目。
+// それ以外の対話版だけの設定は 'azSavedCfg' に保存する（ライブ版の設定を上書きしないため）
+const SHARED_KEYS = ['speechKey', 'speechRegion', 'aoaiEndpoint', 'aoaiKey', 'aoaiDeployment', 'reasoningEffort'];
+const pick = (o, keys) => { const r = {}; if (o) keys.forEach(k => { if (o[k] !== undefined && o[k] !== null && o[k] !== '') r[k] = o[k]; }); return r; };
+let cfg = { ...DEFAULT_CFG };
+
+// 訳さない語（LLM への指示と、英語の音声認識のヒントに使う）。ライブ版と同じ既定値
+const DEFAULT_TERMS = [
+  'Power Platform', 'Power Apps', 'Power Automate', 'Power BI', 'Power Pages', 'Power Fx',
+  'Copilot Studio', 'Microsoft Copilot', 'Microsoft 365 Copilot', 'Copilot', 'Dataverse',
+  'Microsoft Fabric', 'Azure', 'Azure OpenAI', 'Microsoft Foundry', 'Dynamics 365',
+  'SharePoint', 'Microsoft Teams', 'Microsoft Entra', 'Managed Environments',
+  'MCP', 'ALM', 'DLP', 'CoE Starter Kit', 'Agent 365', 'Copilot Studio Kit',
+  'Power Platform admin center', 'GitHub Copilot', 'Microsoft Graph', 'Microsoft Purview', 'Power CAT',
+];
+function getUserTerms() {
+  let raw = LS.getItem('azTerms');
+  if (raw === null && Array.isArray(window.LT_CONFIG?.terms)) raw = window.LT_CONFIG.terms.join('\n');
+  return String(raw || '').split('\n').map(s => s.trim()).filter(Boolean);
+}
+const getTerms = () => [...new Set([...DEFAULT_TERMS, ...getUserTerms()])].slice(0, 200);
+
+// ===== 費用の概算（ライブ版と同じ単価。正確な金額は Azure Cost Management で確認）=====
+const PRICE = {
+  sttPerHourUsd:   1.00,   // Speech 音声認識（リアルタイム）$1/時 ※非公式比較サイトの値
+  nmtPerHourUsd:   2.50,   // Speech 翻訳 $2.50/時 ※Learn の計算例
+  llmInPerMUsd:    0.75,   // gpt-5.4-mini 入力 $/100万トークン ※非公式比較サイトの値
+  llmOutPerMUsd:   4.50,   // gpt-5.4-mini 出力 $/100万トークン（推論トークン含む）
+  nmtCharPerMUsd: 10.00,   // Translator（代替）$/100万文字
+  jpyPerUsd:       160,
+};
+
+// ===== プラットフォーム判定 =====
+function isIOSDevice() {
+  return /iPhone|iPad|iPod/.test(navigator.userAgent)
+      || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1); // iPadOS 13+ の Desktop UA 対策
+}
+const IS_IOS = isIOSDevice();
+const HAS_DISPLAY_MEDIA = !!(navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia);
+
+// ★ iOS・画面共有非対応環境はシステム音声/ミックスのボタンを隠し、マイク入力のみに限定
+function applyPlatformRestrictions() {
+  if (!IS_IOS && HAS_DISPLAY_MEDIA) return;
+  ['A', 'B', 'M'].forEach(sp => {
+    const sysBtn = document.getElementById(`srcSysBtn${sp}`);
+    const mixBtn = document.getElementById(`srcMixBtn${sp}`);
+    if (sysBtn) sysBtn.style.display = 'none';
+    if (mixBtn) mixBtn.style.display = 'none';
+  });
+}
+
+// ===== Recording state (Web Audio API) =====
+// A/B: 2話者モードの各パネル、M: 多言語モードパネル
+let audioCtx      = { A: null, B: null, M: null };
+let processor     = { A: null, B: null, M: null };
+let recSession    = { A: null, B: null, M: null }; // ストリーミング認識セッション
+let recSamples    = { A: 0, B: 0, M: 0 };          // 録音サンプル数
+let recRate       = { A: 16000, B: 16000, M: 16000 }; // 録音の実サンプルレート
+let streams       = { A: null, B: null, M: null };
+let busy          = { A: false, B: false, M: false };
+let logCount      = 0;
+let logData       = []; // CSV出力用ログデータ
+const MAX_LOG_DOM = 150; // ★ 会話ログのDOM表示上限（超過分は古い行から非表示。CSV用 logData は全件保持）
+let convHistory   = [];  // LLM に文脈として渡す直前の発話 { loc, label, text }
+
+// ===== 音声ソース管理 =====
+// バッチ録音モデル（録音中→停止→翻訳→読み上げ）のため、
+// 読み上げ時には録音が既に停止済み → スピーカーの音をマイクが拾う問題は構造的に起きない
+let sourceMode    = { A: 'mic', B: 'mic', M: 'mic' }; // 'mic' | 'system' | 'mix'
+let dispStreams    = { A: null, B: null, M: null };
+let lastTranslated = { A: '', B: '', M: '' };
+let multiLast      = null;
+let uiMode         = 'pair'; // 'pair'（2話者） | 'multi'（多言語）
+// 翻訳後の音声読み上げ ON/OFF（タブ内で保持）。iPhone も既定はオン（相手に聞かせるのが目的）
+let ttsEnabled     = SS.getItem('az_tts_enabled') !== 'off';
+
+const anyRecording = () => Object.values(audioCtx).some(c => c);
+const anyBusy      = () => Object.values(busy).some(v => v);
+
+function toggleTtsEnabled() {
+  ttsEnabled = !ttsEnabled;
+  SS.setItem('az_tts_enabled', ttsEnabled ? 'on' : 'off');
+  if (!ttsEnabled) stopSpeaking();
+  updateTtsToggleUI();
+}
+
+function updateTtsToggleUI() {
+  const btn = document.getElementById('ttsToggleBtn');
+  const m = screenMode === 'mobile';
+  btn.textContent   = ttsEnabled ? (m ? '🔊' : '🔊 読み上げON') : (m ? '🔇' : '🔇 読み上げOFF');
+  btn.style.opacity = ttsEnabled ? '' : '0.55';
+}
+
+// ===== PC版 / iPhone版 の切り替え（ライブ版と同じ方式）=====
+// 既定は端末から自動判定。ヘッダーのボタン、または URL の ?mode=mobile / ?mode=pc で切り替え（端末に記憶）
+function getUiMode() {
+  try {
+    const q = new URLSearchParams(location.search).get('mode');
+    if (q === 'mobile' || q === 'pc') { LS.setItem('azUiMode', q); return q; }
+    const v = LS.getItem('azUiMode');
+    if (v === 'mobile' || v === 'pc') return v;
+  } catch (_) {}
+  return (IS_IOS || /Android|Mobi/.test(navigator.userAgent)) ? 'mobile' : 'pc';
+}
+let screenMode = 'pc';
+function applyUiMode(mode) {
+  screenMode = mode;
+  const mobile = mode === 'mobile';
+  document.body.classList.toggle('mobile', mobile);
+  document.getElementById('uiModeBtn').textContent = mobile ? '📱' : '🖥 PC版';
+  document.getElementById('uiModeBtn').title = mobile ? 'iPhone版（押すと PC版に切替）' : 'PC版（押すと iPhone版に切替）';
+  updateTtsToggleUI();
+  applyFace();
+  // iPhone版はマイク固定（画面共有の音声は使えない／マイクは1つ）
+  if (mobile) {
+    ['A', 'B', 'M'].forEach(sp => {
+      if (sourceMode[sp] !== 'mic') { releaseShare(sp, true); sourceMode[sp] = 'mic'; }
+      document.getElementById(`mic${sp}`).value = '';
+      updateSourceUI(sp);
+    });
+  }
+}
+function toggleUiMode() {
+  if (anyBusy() || anyRecording()) return;
+  const next = screenMode === 'mobile' ? 'pc' : 'mobile';
+  try { LS.setItem('azUiMode', next); } catch (_) {}
+  applyUiMode(next);
+  if (next === 'pc' && isReady(cfg)) loadMicDevices();
+}
+
+// 向かい合わせ表示（iPhone版のみ）: 上側の話者Aを180度回転
+let faceMode = LS.getItem('azFace') === 'on';
+function applyFace() {
+  document.body.classList.toggle('face', faceMode);
+  document.getElementById('faceBtn').style.opacity = faceMode ? '' : '0.6';
+  document.getElementById('faceBtn').textContent = screenMode === 'mobile' ? '↕' : (faceMode ? '↕ 向かい合わせON' : '↕ 向かい合わせ');
+  document.getElementById('faceBtn').classList.toggle('on', faceMode);
+}
+function toggleFace() {
+  faceMode = !faceMode;
+  try { LS.setItem('azFace', faceMode ? 'on' : 'off'); } catch (_) {}
+  applyFace();
+}
+
+const HINT_IDLE = 'ボタンを押して録音開始<br>もう一度押すと翻訳・読み上げ';
+
+// ===== ソース切り替え =====
+function setSource(sp, mode) {
+  if (busy[sp] || audioCtx[sp]) return; // 録音中・処理中は切り替え不可
+  if ((mode === 'system' || mode === 'mix') && (IS_IOS || !HAS_DISPLAY_MEDIA || screenMode === 'mobile')) return;
+  sourceMode[sp] = mode;
+  updateSourceUI(sp);
+}
+
+function updateSourceUI(sp) {
+  const mode  = sourceMode[sp];
+  const isSys = mode === 'system';
+  const isMix = mode === 'mix';
+  document.getElementById(`srcMicBtn${sp}`).className =
+    `source-toggle-btn${mode === 'mic' ? ' active-mic' : ''}`;
+  document.getElementById(`srcSysBtn${sp}`).className =
+    `source-toggle-btn${isSys ? ' active-sys' : ''}`;
+  const mixBtn = document.getElementById(`srcMixBtn${sp}`);
+  if (mixBtn) mixBtn.className = `source-toggle-btn${isMix ? ' active-mix' : ''}`;
+  document.getElementById(`mic${sp}`).style.display    = isSys ? 'none' : '';
+  document.getElementById(`sysInfo${sp}`).style.display = (isSys || isMix) ? '' : 'none';
+  document.getElementById(`micBtn${sp}`).textContent = isSys ? '🖥' : (isMix ? '🎧' : '🎤');
+  if (isSys || isMix) {
+    updateShareUI(sp, hasLiveShare(sp));
+  } else if (sp !== 'M') {
+    document.getElementById(`hint${sp}`).innerHTML = HINT_IDLE;
+  }
+}
+
+// ===== 共有ストリームの状態管理 =====
+function hasLiveShare(sp) {
+  return !!dispStreams[sp]?.getAudioTracks().some(t => t.readyState === 'live');
+}
+
+function updateShareUI(sp, sharing) {
+  const badge = document.getElementById(`sysInfo${sp}`);
+  badge.className   = `sys-info-badge${sharing ? ' sharing' : ''}`;
+  badge.textContent = sharing ? '🟢 共有中（クリックで停止）' : '画面共有で音声を選択';
+  if (sourceMode[sp] === 'system' || sourceMode[sp] === 'mix') {
+    const mix = sourceMode[sp] === 'mix';
+    document.getElementById(`hint${sp}`).innerHTML = sharing
+      ? (mix
+          ? 'クリックで録音開始（マイク+システム音声を同時に拾う）<br>もう一度クリックで翻訳'
+          : 'クリックで録音開始（ダイアログ不要）<br>もう一度クリックで翻訳・読み上げ')
+      : 'クリックで画面共有ダイアログを開く<br>「音声を共有」を有効にして録音開始';
+  }
+}
+
+function stopShare(sp) {
+  if (!hasLiveShare(sp)) return;
+  if (audioCtx[sp] && !busy[sp]) stopRec(sp);
+  releaseShare(sp, true);
+}
+
+function releaseShare(sp, stopTracks) {
+  if (dispStreams[sp]) {
+    if (stopTracks) dispStreams[sp].getTracks().forEach(t => t.stop());
+    dispStreams[sp] = null;
+  }
+  updateShareUI(sp, false);
+}
+
+// ===== マイクデバイス一覧を取得してセレクターを更新（PC版のみ）=====
+async function loadMicDevices() {
+  if (screenMode === 'mobile') return; // iPhone版はマイク1つ・選択欄なし（起動時の許可ダイアログも出さない）
+  try {
+    const tmp = await navigator.mediaDevices.getUserMedia({ audio: true });
+    tmp.getTracks().forEach(t => t.stop());
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const mics = devices.filter(d => d.kind === 'audioinput');
+    ['A', 'B', 'M'].forEach(sp => {
+      const sel = document.getElementById(`mic${sp}`);
+      const cur = sel.value;
+      sel.innerHTML = '<option value="">🎤 デフォルト</option>';
+      mics.forEach((d, i) => {
+        const opt = document.createElement('option');
+        opt.value = d.deviceId;
+        opt.textContent = d.label || `マイク ${i + 1}`;
+        sel.appendChild(opt);
+      });
+      if ([...sel.options].some(o => o.value === cur)) sel.value = cur;
+    });
+  } catch (e) {
+    console.warn('マイク一覧取得に失敗:', e);
+  }
+}
+
+// ===== Settings =====
+const val = id => document.getElementById(id).value.trim();
+
+function updateEngineFields() {
+  document.getElementById('llmFields').style.display = val('engine') === 'llm' ? '' : 'none';
+}
+
+// "proj-xxx" / "https://proj-xxx.openai.azure.com/openai/v1" どちらでも受け付けて正規化
+function normalizeEndpoint(v) {
+  v = (v || '').trim().replace(/\/+$/, '');
+  if (!v) return '';
+  if (!/^https?:\/\//i.test(v)) v = `https://${v}.openai.azure.com`;
+  return v.replace(/\/openai(\/v1)?(\/.*)?$/i, '');
+}
+
+function isReady(c) {
+  return !!(c.speechKey && c.speechRegion && (c.engine !== 'llm' || (c.aoaiEndpoint && c.aoaiKey)));
+}
+
+function updateEngineBadge() {
+  document.getElementById('engineBadge').textContent = cfg.engine === 'llm' ? 'Speech + LLM' : 'Speech 翻訳';
+}
+
+let effortFallbackNotified = false;
+function saveSettings() {
+  const next = {
+    engine:          val('engine') === 'nmt' ? 'nmt' : 'llm',
+    speechKey:       val('speechKey'),
+    speechRegion:    val('speechRegion').toLowerCase(),
+    ttsEngine:       val('ttsEngine'),
+    aoaiEndpoint:    normalizeEndpoint(val('aoaiEndpoint')),
+    aoaiKey:         val('aoaiKey'),
+    aoaiDeployment:  val('aoaiDeployment') || 'gpt-5.4-mini',
+    reasoningEffort: val('reasoningEffort') === 'low' ? 'low' : 'none',
+    tone:            val('tone'),
+    ctxCount:        parseInt(val('ctxCount'), 10) || 0,
+    budgetWarn:      parseInt(val('budgetWarn'), 10) || 0,
+  };
+  if (!next.speechKey || !next.speechRegion) { alert('Speech キーとリージョンを入力してください'); return; }
+  if (next.engine === 'llm' && (!next.aoaiEndpoint || !next.aoaiKey)) {
+    alert('LLM 翻訳には Foundry のエンドポイントとキーが必要です（Speech 翻訳に切り替えればキーなしで使えます）'); return;
+  }
+  cfg = next;
+  effortFallbackNotified = false;
+  SS.setItem('azCfg', JSON.stringify(cfg));
+  try { LS.setItem('azTerms', document.getElementById('termsInput').value); } catch (_) {}
+  setRate(val('ttsRate'));
+  try {
+    if (document.getElementById('rememberKeys').checked) {
+      // 共通項目はライブ版の保存内容にマージ（ライブ版だけの設定は残す）
+      const shared = readJson(LS, 'lvSavedCfg') || {};
+      SHARED_KEYS.forEach(k => { shared[k] = cfg[k]; });
+      LS.setItem('lvSavedCfg', JSON.stringify(shared));
+      const own = {};
+      Object.keys(DEFAULT_CFG).filter(k => !SHARED_KEYS.includes(k)).forEach(k => { own[k] = cfg[k]; });
+      LS.setItem('azSavedCfg', JSON.stringify(own));
+    } else {
+      LS.removeItem('lvSavedCfg');
+      LS.removeItem('azSavedCfg');
+    }
+  } catch (_) {}
+  document.getElementById('settingsModal').style.display = 'none';
+  updateEngineBadge();
+  renderCost();
+  loadMicDevices();
+}
+
+function openSettings() {
+  const set = (id, v) => { document.getElementById(id).value = v; };
+  set('engine',          cfg.engine);
+  set('speechKey',       cfg.speechKey);
+  set('speechRegion',    cfg.speechRegion);
+  set('ttsEngine',       cfg.ttsEngine || 'browser');
+  set('aoaiEndpoint',    cfg.aoaiEndpoint);
+  set('aoaiKey',         cfg.aoaiKey);
+  set('aoaiDeployment',  cfg.aoaiDeployment);
+  set('reasoningEffort', cfg.reasoningEffort);
+  set('tone',            cfg.tone);
+  set('ctxCount',        String(cfg.ctxCount));
+  set('budgetWarn',      cfg.budgetWarn);
+  set('termsInput',      getUserTerms().join('\n'));
+  set('ttsRate',         String(currentRate));
+  document.getElementById('rememberKeys').checked = !!LS.getItem('lvSavedCfg');
+  updateEngineFields();
+  document.getElementById('settingsModal').style.display = 'flex';
+}
+
+// 設定ファイル（live-translator.config.js の window.LT_CONFIG）の値を読み取る
+function readConfigFile() {
+  const f = window.LT_CONFIG;
+  if (!f || typeof f !== 'object') return {};
+  // budgetWarn はライブ版用の値なので読まない
+  const out = pick(f, Object.keys(DEFAULT_CFG).filter(k => k !== 'budgetWarn'));
+  if (out.aoaiEndpoint) out.aoaiEndpoint = normalizeEndpoint(out.aoaiEndpoint);
+  for (const k of ['speechKey', 'aoaiKey']) if (/^<.*>$/.test(String(out[k] || ''))) delete out[k]; // 未記入のテンプレート値
+  return out;
+}
+
+// ===== 読み上げ速度（0.7〜2.0倍。Azure TTS の上限が 2 倍のため）=====
+const clampRate = r => Math.min(2, Math.max(0.7, Math.round((parseFloat(r) || 1) * 10) / 10));
+let currentRate = (() => {
+  const v = LS.getItem('azTtsRate');
+  if (v) return clampRate(v);
+  return clampRate(window.LT_CONFIG?.ttsRate ?? 1);
+})();
+function setRate(r) {
+  currentRate = clampRate(r);
+  try { LS.setItem('azTtsRate', String(currentRate)); } catch (_) {}
+}
+
+// 診断表示: どの段階まで進んだかを画面とコンソールに残す
+const diagState = {};
+function diag(key, value) {
+  diagState[key] = value;
+  const order = ['info', 'audio', 'speech', 'llm', 'tts'];
+  document.getElementById('diagText').textContent =
+    order.filter(k => diagState[k]).map(k => diagState[k]).join(' / ');
+  console.log('[AZ]', key, value);
+}
+
+// ===== モード切替（2話者 ⇄ 多言語） =====
+function switchMode(mode) {
+  if (anyBusy() || anyRecording()) return;
+  uiMode = mode;
+  document.querySelector('.speakers').style.display = (mode === 'pair')  ? '' : 'none';
+  document.getElementById('panelM').style.display   = (mode === 'multi') ? '' : 'none';
+  document.getElementById('tabPair').className  = `mode-tab${mode === 'pair'  ? ' active' : ''}`;
+  document.getElementById('tabMulti').className = `mode-tab${mode === 'multi' ? ' active' : ''}`;
+  document.getElementById('faceBtn').style.visibility = (mode === 'pair') ? '' : 'hidden';
+}
+
+// ===== 多言語モード: 参加言語チップ =====
+function getMultiLangs() {
+  return [...document.querySelectorAll('#langChips input:checked')].map(c => c.value);
+}
+
+function toggleMultiLang(cb) {
+  // 言語自動判定（開始時判定）の候補は最大4言語まで
+  if (getMultiLangs().length > 4) {
+    cb.checked = false;
+    alert('言語の自動判定は最大4言語までです。');
+    return;
+  }
+  refreshTtsOptions();
+}
+
+function refreshTtsOptions() {
+  const sel = document.getElementById('ttsLangM');
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">🔇 読み上げなし</option>';
+  getMultiLangs().forEach(l => {
+    const o = document.createElement('option');
+    o.value = l;
+    o.textContent = `🔊 ${nameOf(l)}`;
+    sel.appendChild(o);
+  });
+  if ([...sel.options].some(o => o.value === cur)) sel.value = cur;
+}
+
+// ===== iOS: ボタンを押した瞬間に音声を有効にする =====
+// iOS Safari は「タップの瞬間」でないと音声再生を許可しないため、
+// 録音の開始・停止ボタンを押した時点（最初の await より前）でロック解除しておく
+function unlockTtsForGesture() {
+  if (!ttsEnabled) return;
+  try {
+    if (window.speechSynthesis && cfg.ttsEngine !== 'azure') {
+      const u = new SpeechSynthesisUtterance(' ');
+      u.volume = 0;
+      window.speechSynthesis.speak(u);
+    }
+  } catch (_) {}
+  try {
+    // Azure 読み上げ用の audio 要素は、無音の再生でロック解除したものを使い回す
+    if (!window._ttsAudioEl) window._ttsAudioEl = new Audio();
+    const a = window._ttsAudioEl;
+    a.src = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=';
+    const pr = a.play();
+    if (pr && pr.catch) pr.catch(() => {});
+  } catch (_) {}
+}
+
+// iOS 17 以降の Audio Session API（あれば使う）。録音直後の読み上げが通話用スピーカーから
+// 小さく出るのを避けるため、読み上げ前に「再生」用に切り替える。※実機未検証
+function setAudioSession(type) {
+  try { if (navigator.audioSession) navigator.audioSession.type = type; } catch (_) {}
+}
+
+// ===== トグル制御 =====
+function toggleRec(sp) {
+  // 読み上げ中に押されたら読み上げを止める（相手がすぐ返事できるように）
+  if (speakingNow) { stopSpeaking(); return; }
+  if (anyBusy()) return; // いずれかのパネルが処理中は無視
+  unlockTtsForGesture();
+  if (audioCtx[sp]) {
+    stopRec(sp);   // 録音中 → 停止して翻訳
+  } else {
+    if (anyRecording()) return; // もう片方が録音中
+    stopSpeaking();             // 読み上げ中なら止めて、すぐ話せるようにする
+    startRec(sp);
+  }
+}
+
+// ===== 画面共有ストリームの確保（システム音声/ミックス共用・PC版のみ） =====
+async function ensureShare(sp) {
+  if (hasLiveShare(sp)) return true;
+
+  setStatus(sp, 'processing');
+  let dispStream;
+  try {
+    dispStream = await navigator.mediaDevices.getDisplayMedia({
+      video: true,   // Chrome は video:true が必要
+      audio: {
+        echoCancellation:           false,
+        noiseSuppression:           false,
+        autoGainControl:            false,
+        suppressLocalAudioPlayback: false,
+      }
+    });
+  } catch (err) {
+    setStatus(sp, 'idle');
+    if (err.name !== 'NotAllowedError') {
+      alert(`システム音声の取得に失敗しました:\n${err.message}`);
+    }
+    return false;
+  }
+
+  const audioTracks = dispStream.getAudioTracks();
+  if (audioTracks.length === 0) {
+    dispStream.getTracks().forEach(t => t.stop());
+    setStatus(sp, 'idle');
+    alert(
+      'システム音声が取得できませんでした。\n\n' +
+      '【Chrome/Edge の場合】\n' +
+      '・タブを共有: ダイアログ下部「タブの音声を共有」をONにする\n' +
+      '・画面/ウィンドウを共有: 「システムの音声を共有する」にチェックを入れる\n\n' +
+      '※ macOS はタブ音声のみ対応です'
+    );
+    return false;
+  }
+
+  dispStream.getVideoTracks().forEach(t => t.stop());
+  dispStreams[sp] = dispStream;
+
+  audioTracks[0].addEventListener('ended', () => {
+    if (audioCtx[sp] && !busy[sp]) stopRec(sp);
+    releaseShare(sp, false);
+  });
+
+  updateShareUI(sp, true);
+  return true;
+}
+
+// AudioContext の作成。PC は 16kHz を要求（通信量削減）。
+// iOS は実際のマイクと違うレートを指定すると無音・雑音になることがあるため既定レート（ライブ版と同じ）
+function createAudioContext() {
+  const AC = window.AudioContext || window.webkitAudioContext;
+  if (IS_IOS) return new AC();
+  try { return new AC({ sampleRate: 16000 }); } catch (_) { return new AC(); }
+}
+
+// ===== 録音開始（Web Audio API + ストリーミング認識） =====
+async function startRec(sp) {
+  if (!isReady(cfg)) { openSettings(); return; }
+  if (busy[sp] || audioCtx[sp]) return;
+  busy[sp] = true;
+
+  // ★ iOS: 最初の await より前に AudioContext を作って resume（タップの瞬間しか有効にできない）
+  let ctx = null;
+  try { ctx = createAudioContext(); ctx.resume?.().catch(() => {}); } catch (e) { console.warn(e); }
+  setAudioSession('auto');
+
+  try {
+    if (!ctx) throw new Error('このブラウザでは録音（Web Audio API）が使えません。');
+    if (typeof SpeechSDK === 'undefined') {
+      throw new Error('Azure Speech SDK の読み込みに失敗しました。インターネット接続を確認してください。');
+    }
+    const mode = sourceMode[sp];
+    const inputStreams = [];
+    let micStream = null;
+
+    if (mode === 'mic' || mode === 'mix') {
+      const deviceId = document.getElementById(`mic${sp}`).value;
+      const constraints = {
+        audio: {
+          channelCount:    1,
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl:  true,
+          ...(deviceId ? { deviceId: { exact: deviceId } } : {})
+        }
+      };
+      micStream = await navigator.mediaDevices.getUserMedia(constraints);
+      inputStreams.push(micStream);
+    }
+
+    if (mode === 'system' || mode === 'mix') {
+      const ok = await ensureShare(sp);
+      if (!ok) {
+        micStream?.getTracks().forEach(t => t.stop());
+        return;
+      }
+      inputStreams.push(new MediaStream(dispStreams[sp].getAudioTracks()));
+    }
+
+    streams[sp] = micStream;
+
+    // getUserMedia の待ち中に止まっていることがあるので、もう一度 resume
+    if (ctx.state === 'suspended') { try { await ctx.resume(); } catch (_) {} }
+    audioCtx[sp] = ctx;
+    const actualRate = ctx.sampleRate;
+    recRate[sp] = actualRate;
+    diag('audio', `🎤 録音 ${actualRate}Hz`);
+
+    // ===== ストリーミング認識セッションを開始 =====
+    // 録音しながら音声を逐次送信し、認識を発話と並行して進める（停止後の待ちが短い）
+    const useLlm = cfg.engine === 'llm';
+    let session;
+    if (sp === 'M') {
+      const candidates = getMultiLangs();
+      if (candidates.length < 2) {
+        await ctx.close(); audioCtx[sp] = null;
+        micStream?.getTracks().forEach(t => t.stop()); streams[sp] = null;
+        setStatus(sp, 'idle');
+        alert('参加言語を2つ以上選択してください。');
+        return;
+      }
+      session = useLlm
+        ? startRecognitionSessionMulti(candidates, actualRate,
+            (p) => updateTranscriptMulti(p, candidates, 'listening'))
+        : startTranslationSessionMulti(candidates, actualRate,
+            (p) => updateTranscriptMulti(p, candidates, 'listening'));
+    } else {
+      const other    = sp === 'A' ? 'B' : 'A';
+      const fromLang = document.getElementById(`lang${sp}`).value;
+      const toLang   = document.getElementById(`lang${other}`).value;
+      session = useLlm
+        ? startRecognitionSession(fromLang, toLang, actualRate,
+            (p) => updateTranscript(sp, p.original, null, toLang, 'listening'))
+        : startTranslationSession(fromLang, toLang, actualRate,
+            (p) => updateTranscript(sp, p.original, p.translated, toLang, 'listening'));
+    }
+    recSession[sp] = session;
+    recSamples[sp] = 0;
+
+    // ★ バッファ 1024（16kHz時 64ms 単位の送信）: 停止時の残りフラッシュ待ちを短縮
+    processor[sp] = ctx.createScriptProcessor(1024, 1, 1);
+    processor[sp].onaudioprocess = (e) => {
+      const s = recSession[sp];
+      if (!s) return;
+      const f32 = e.inputBuffer.getChannelData(0);
+      recSamples[sp] += f32.length;
+      s.write(f32);
+    };
+
+    inputStreams.forEach(st => {
+      ctx.createMediaStreamSource(st).connect(processor[sp]);
+    });
+    processor[sp].connect(ctx.destination);
+
+    // ★ 会話中は画面を消さない（対応ブラウザのみ。録音停止後も会話が続くので保持する）
+    requestWakeLock();
+
+    setStatus(sp, 'recording');
+    document.getElementById(`micBtn${sp}`).classList.add('recording');
+    document.getElementById(`panel${sp}`).classList.add('active');
+    document.getElementById(`ripple${sp}`).classList.add('active');
+
+  } catch (err) {
+    console.error(err);
+    recSession[sp]?.cancel(); recSession[sp] = null;
+    audioCtx[sp] = null;
+    processor[sp] = null;
+    streams[sp]?.getTracks().forEach(t => t.stop()); streams[sp] = null;
+    setStatus(sp, 'idle');
+    const msg = (err.name === 'NotAllowedError' || err.name === 'NotFoundError')
+      ? '音声へのアクセスが許可されていません。ブラウザの設定（iPhone は「設定」→ Safari →マイク）を確認してください。'
+      : (err.message || String(err));
+    alert(msg);
+  } finally {
+    // 録音に使わなかった AudioContext は閉じる（早期 return・失敗時）
+    if (ctx && audioCtx[sp] !== ctx) { try { ctx.close(); } catch (_) {} }
+    busy[sp] = false;
+  }
+}
+
+// ===== 録音停止 → 認識完了待ち → 翻訳 → 表示 → 読み上げ =====
+async function stopRec(sp) {
+  busy[sp] = true;
+  setStatus(sp, 'processing');
+
+  const micBtn = document.getElementById(`micBtn${sp}`);
+  micBtn.classList.remove('recording');
+  micBtn.textContent = '⏳';
+  document.getElementById(`ripple${sp}`).classList.remove('active');
+
+  // Web Audio を停止（共有トラックは dispStreams 側で保持し、ここでは止めない）
+  try { processor[sp]?.disconnect(); } catch (_) {}
+  streams[sp]?.getTracks().forEach(t => t.stop());
+  streams[sp] = null;
+  try { await audioCtx[sp]?.close(); } catch (_) {}
+  audioCtx[sp]  = null;
+  processor[sp] = null;
+
+  const session  = recSession[sp];
+  recSession[sp] = null;
+
+  const isMulti = sp === 'M';
+  const other   = isMulti ? null : (sp === 'A' ? 'B' : 'A');
+  const audioSec = recSamples[sp] / (recRate[sp] || 16000);
+
+  try {
+    if (!session) throw new Error('認識セッションが見つかりません。もう一度お試しください。');
+    if (audioSec < 0.2) {
+      session.cancel();
+      throw new Error('音声が短すぎます。もう少し長く話してください。');
+    }
+
+    const cost = { audioSec, engine: session.engine, inTok: 0, outTok: 0, nmtChars: 0 };
+
+    if (isMulti) {
+      // ===== 多言語モード =====
+      const r = await session.finish();
+      if (!r.original) { addCost(cost); throw new Error('音声を認識できませんでした。はっきり話してもう一度お試しください。'); }
+      let res = r;
+      if (session.engine === 'llm') {
+        updateTranscriptMulti({ ...r, translations: {} }, session.candidates, 'translating');
+        const targets = session.candidates.filter(l => l !== r.detectedLocale);
+        const t = await translateMulti(r.original, r.detectedLocale, targets, cost);
+        res = { ...r, translations: t.translations, engine: t.engine };
+      }
+      addCost(cost);
+      updateTranscriptMulti(res, session.candidates, false);
+      addLogMulti(res, session.candidates);
+      pushHistory(r.detectedLocale, '話者', r.original);
+
+      const ttsSel = document.getElementById('ttsLangM').value;
+      if (ttsEnabled && ttsSel && res.engine !== 'source') {
+        const text = (ttsSel === res.detectedLocale) ? res.original : res.translations[tcOf(ttsSel)];
+        if (text && !isEmptyTranslation(text)) {
+          setStatus(sp, 'speaking');
+          await tts(text, ttsSel);
+        }
+      }
+
+    } else {
+      // ===== 2話者モード =====
+      const r = await session.finish();
+      if (!r.original) { addCost(cost); throw new Error('音声を認識できませんでした。はっきり話してもう一度お試しください。'); }
+      let translated = r.translated;
+      let engine = 'speech';
+      if (session.engine === 'llm') {
+        updateTranscript(sp, r.original, null, session.toLang, 'translating');
+        const t = await translateOne(r.original, session.fromLang, session.toLang, cost);
+        translated = t.text; engine = t.engine;
+      }
+      addCost(cost);
+      updateTranscript(sp, r.original, translated, session.toLang, false, engine);
+      addLog(sp, r.original, translated, session.fromLang, session.toLang, engine);
+      pushHistory(session.fromLang, `話者${sp}`, r.original);
+
+      // 読み上げ（相手側パネルで再生）。翻訳失敗（原文のまま）や意味のない断片は読み上げない
+      if (ttsEnabled && engine !== 'source' && !isEmptyTranslation(translated)) {
+        setStatus(other, 'speaking');
+        document.getElementById(`panel${other}`).classList.add('active');
+        await tts(translated, session.toLang);
+      }
+    }
+
+  } catch (err) {
+    showError(sp, err.message);
+  } finally {
+    setStatus(sp, 'idle');
+    document.getElementById(`panel${sp}`).classList.remove('active');
+    if (other) {
+      setStatus(other, 'idle');
+      document.getElementById(`panel${other}`).classList.remove('active');
+    }
+    document.getElementById(`micBtn${sp}`).textContent =
+      sourceMode[sp] === 'system' ? '🖥' : (sourceMode[sp] === 'mix' ? '🎧' : '🎤');
+    busy[sp] = false;
+  }
+}
+
+// ===== 画面ロック防止（Screen Wake Lock API） =====
+// 会話は録音と録音の間も続くので、一度録音したらページを閉じるまで保持する。
+// タブが裏に回ると自動解放されるため、前面に戻ったら取り直す
+let wakeLock = null, wakeWanted = false;
+async function requestWakeLock() {
+  wakeWanted = true;
+  if (!('wakeLock' in navigator) || wakeLock) return;
+  try {
+    wakeLock = await navigator.wakeLock.request('screen');
+    wakeLock.addEventListener('release', () => { wakeLock = null; });
+  } catch (err) {
+    console.warn('Wake Lock 取得失敗:', err.name, err.message);
+  }
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && wakeWanted && !wakeLock) requestWakeLock();
+});
+
+// ===== 変換: Float32 → 16bit PCM =====
+function floatTo16BitPCM(f32) {
+  const i16 = new Int16Array(f32.length);
+  for (let i = 0; i < f32.length; i++) {
+    const s = Math.max(-1, Math.min(1, f32[i]));
+    i16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+  }
+  return i16;
+}
+
+const joiner = tc => /^(ja|zh)/.test(tc || '') ? '' : ' ';
+
+// ===== ストリーミング認識の共通処理 =====
+// 録音開始時に接続と連続認識を開始し、録音中の音声を write() で逐次送信する。
+// finish() で送信を終え、残りの認識が終わったら getResult() の値で確定する。
+// 参考: Microsoft Learn "How to recognize speech"（continuous recognition）
+function runStreamingSession(recognizer, pushStream, { onRecognized, onRecognizing, hasData, getResult }) {
+  let settled  = false;
+  let watchdog = null;
+  let resolveFn, rejectFn;
+  const resultPromise = new Promise((res, rej) => { resolveFn = res; rejectFn = rej; });
+  resultPromise.catch(() => {}); // finish() 前のエラーで unhandledrejection を出さない
+
+  const settle = (err) => {
+    if (settled) return;
+    settled = true;
+    clearTimeout(watchdog);
+    const done = () => {
+      try { recognizer.close(); } catch (_) {}
+      // エラーでも部分結果があればそれを返す（全損よりは救済を優先）
+      if (err && !hasData()) { rejectFn(err); return; }
+      resolveFn(getResult());
+    };
+    try { recognizer.stopContinuousRecognitionAsync(done, done); } catch (_) { done(); }
+  };
+
+  if (onRecognizing) {
+    recognizer.recognizing = (s, e) => {
+      if (settled) return;
+      try { onRecognizing(e); } catch (uiErr) { console.warn(uiErr); }
+    };
+  }
+  recognizer.recognized = (s, e) => {
+    try { onRecognized(e, settled); } catch (uiErr) { console.warn(uiErr); }
+  };
+  recognizer.canceled = (s, e) => {
+    if (e.reason === SpeechSDK.CancellationReason.Error) {
+      const d = e.errorDetails || '不明なエラー';
+      const hint = /1006|401|403|auth/i.test(d) ? '（キーとリージョンの組み合わせを確認。ygl-ai-translator は eastus）' : '';
+      diag('speech', `❌ Speech: ${d}`);
+      settle(new Error(`音声認識失敗: ${d}${hint}`));
+    } else {
+      settle(); // EndOfStream: 音声を最後まで処理し終えた正常終了
+    }
+  };
+  recognizer.sessionStopped = () => settle();
+
+  recognizer.startContinuousRecognitionAsync(
+    () => diag('speech', '✅ Speech 接続'),
+    err => {
+      if (!settled) {
+        settled = true;
+        try { recognizer.close(); } catch (_) {}
+        diag('speech', `❌ Speech: ${err}`);
+        rejectFn(new Error(String(err)));
+      }
+    }
+  );
+
+  return {
+    write(f32) {
+      if (settled) return;
+      try { pushStream.write(floatTo16BitPCM(f32).buffer); } catch (_) { /* 終端後は無視 */ }
+    },
+    finish() {
+      try { pushStream.close(); } catch (_) {}
+      if (!settled) {
+        watchdog = setTimeout(
+          () => settle(new Error('音声認識がタイムアウトしました。もう一度お試しください。')),
+          30000
+        );
+      }
+      return resultPromise;
+    },
+    cancel() {
+      if (settled) return;
+      settled = true;
+      clearTimeout(watchdog);
+      try { pushStream.close(); } catch (_) {}
+      try {
+        recognizer.stopContinuousRecognitionAsync(() => recognizer.close(), () => recognizer.close());
+      } catch (_) { try { recognizer.close(); } catch (__) {} }
+    },
+  };
+}
+
+function makePushStream(sampleRate) {
+  const format     = SpeechSDK.AudioStreamFormat.getWaveFormatPCM(sampleRate, 16, 1);
+  const pushStream = SpeechSDK.AudioInputStream.createPushStream(format);
+  return { pushStream, audioConfig: SpeechSDK.AudioConfig.fromStreamInput(pushStream) };
+}
+
+// 英語の認識に製品名のヒントを渡す（聞き間違いを減らす）
+function addPhraseHints(recognizer, lang) {
+  if (!/^en/.test(lang)) return;
+  try {
+    const pl = SpeechSDK.PhraseListGrammar.fromRecognizer(recognizer);
+    getTerms().forEach(p => pl.addPhrase(p));
+  } catch (e) { console.warn('フレーズリスト設定失敗:', e); }
+}
+
+// ===== LLM 方式: 音声認識のみのセッション（2話者モード） =====
+function startRecognitionSession(fromLang, toLang, sampleRate, onProgress) {
+  const speechConfig = SpeechSDK.SpeechConfig.fromSubscription(cfg.speechKey, cfg.speechRegion);
+  speechConfig.speechRecognitionLanguage = fromLang;
+  const { pushStream, audioConfig } = makePushStream(sampleRate);
+  const recognizer = new SpeechSDK.SpeechRecognizer(speechConfig, audioConfig);
+  addPhraseHints(recognizer, fromLang);
+
+  const j = joiner(tcOf(fromLang));
+  const originals = [];
+  const text = (interim) => [...originals, ...(interim ? [interim] : [])].join(j);
+
+  const s = runStreamingSession(recognizer, pushStream, {
+    onRecognizing: e => { if (e.result.text && onProgress) onProgress({ original: text(e.result.text) }); },
+    onRecognized: (e, settled) => {
+      if (e.result.reason === SpeechSDK.ResultReason.RecognizedSpeech && e.result.text) {
+        originals.push(e.result.text);
+        if (onProgress && !settled) onProgress({ original: text() });
+      }
+    },
+    hasData:   () => originals.length > 0,
+    getResult: () => ({ original: text() || null }),
+  });
+  return { ...s, engine: 'llm', fromLang, toLang };
+}
+
+// ===== LLM 方式: 言語自動判定 + 音声認識のみ（多言語モード） =====
+// AutoDetectSourceLanguageConfig（開始時判定・候補は最大4言語）。v2 エンドポイントを使う
+// 参考: Microsoft Learn "Language identification"（JavaScript）
+function startRecognitionSessionMulti(candidates, sampleRate, onProgress) {
+  const endpoint = `wss://${cfg.speechRegion}.stt.speech.microsoft.com/speech/universal/v2`;
+  const speechConfig = SpeechSDK.SpeechConfig.fromEndpoint(new URL(endpoint), cfg.speechKey);
+  const autoDetect = SpeechSDK.AutoDetectSourceLanguageConfig.fromLanguages(candidates);
+  const { pushStream, audioConfig } = makePushStream(sampleRate);
+  const recognizer = SpeechSDK.SpeechRecognizer.FromConfig(speechConfig, autoDetect, audioConfig);
+
+  const originals = [];
+  let detectedLocale = null;
+  const detect = r => {
+    if (detectedLocale) return;
+    try {
+      const lang = SpeechSDK.AutoDetectSourceLanguageResult.fromResult(r).language;
+      // "en-US" 以外の形（"en" など）で返った場合も候補に寄せる
+      detectedLocale = candidates.find(c => c === lang) || candidates.find(c => lang && c.startsWith(lang.split('-')[0])) || null;
+    } catch (_) {}
+  };
+  const build = (interim) => {
+    const loc = detectedLocale || candidates[0];
+    const original = [...originals, ...(interim ? [interim] : [])].join(joiner(tcOf(loc))) || null;
+    return { detectedLocale: loc, original, translations: {} };
+  };
+
+  const s = runStreamingSession(recognizer, pushStream, {
+    onRecognizing: e => { if (e.result.text && onProgress) { detect(e.result); onProgress(build(e.result.text)); } },
+    onRecognized: (e, settled) => {
+      if (e.result.reason === SpeechSDK.ResultReason.RecognizedSpeech && e.result.text) {
+        detect(e.result);
+        originals.push(e.result.text);
+        if (onProgress && !settled) onProgress(build());
+      }
+    },
+    hasData:   () => originals.length > 0,
+    getResult: () => build(),
+  });
+  return { ...s, engine: 'llm', candidates };
+}
+
+// ===== 従来方式: Speech Translation（2話者モード） =====
+function startTranslationSession(fromLang, toLang, sampleRate, onProgress) {
+  const fromTC = tcOf(fromLang);
+  const toTC   = tcOf(toLang);
+  const translationConfig = SpeechSDK.SpeechTranslationConfig.fromSubscription(cfg.speechKey, cfg.speechRegion);
+  translationConfig.speechRecognitionLanguage = fromLang;
+  translationConfig.addTargetLanguage(toTC);
+  const { pushStream, audioConfig } = makePushStream(sampleRate);
+  const recognizer = new SpeechSDK.TranslationRecognizer(translationConfig, audioConfig);
+  addPhraseHints(recognizer, fromLang);
+
+  const originals = [], translateds = [];
+  const build = () => {
+    const original = originals.join(joiner(fromTC)) || null;
+    const translated = (fromTC === toTC) ? original : (translateds.join(joiner(toTC)) || original);
+    return { original, translated };
+  };
+  const s = runStreamingSession(recognizer, pushStream, {
+    onRecognized: (e, settled) => {
+      if (e.result.reason === SpeechSDK.ResultReason.TranslatedSpeech && e.result.text) {
+        originals.push(e.result.text);
+        translateds.push(e.result.translations.get(toTC) || e.result.text);
+        if (onProgress && !settled) onProgress(build());
+      }
+    },
+    hasData:   () => originals.length > 0,
+    getResult: build,
+  });
+  return { ...s, engine: 'speech', fromLang, toLang };
+}
+
+// ===== 従来方式: 言語自動判定 + 全参加言語への同時翻訳（多言語モード） =====
+function startTranslationSessionMulti(candidates, sampleRate, onProgress) {
+  const endpoint = `wss://${cfg.speechRegion}.stt.speech.microsoft.com/speech/universal/v2`;
+  const translationConfig = SpeechSDK.SpeechTranslationConfig.fromEndpoint(new URL(endpoint), cfg.speechKey);
+  translationConfig.speechRecognitionLanguage = candidates[0]; // LID 使用時は使われないが設定必須
+  const targetTCs = candidates.map(tcOf);
+  targetTCs.forEach(tc => translationConfig.addTargetLanguage(tc));
+  const autoDetect = SpeechSDK.AutoDetectSourceLanguageConfig.fromLanguages(candidates);
+  const { pushStream, audioConfig } = makePushStream(sampleRate);
+  const recognizer = SpeechSDK.TranslationRecognizer.FromConfig(translationConfig, autoDetect, audioConfig);
+
+  const originals = [];
+  const transSegs = {};
+  targetTCs.forEach(tc => { transSegs[tc] = []; });
+  let detectedLocale = null;
+
+  const build = () => {
+    const detTC = detectedLocale ? tcOf(detectedLocale) : null;
+    const original = originals.join(joiner(detTC || 'en')) || null;
+    const translations = {};
+    targetTCs.forEach(tc => {
+      if (tc === detTC) return;
+      const t = transSegs[tc].join(joiner(tc));
+      if (t) translations[tc] = t;
+    });
+    return { detectedLocale: detectedLocale || candidates[0], original, translations, engine: 'speech' };
+  };
+
+  const s = runStreamingSession(recognizer, pushStream, {
+    onRecognized: (e, settled) => {
+      if (e.result.reason === SpeechSDK.ResultReason.TranslatedSpeech && e.result.text) {
+        if (!detectedLocale) {
+          try {
+            detectedLocale = e.result.properties.getProperty(
+              SpeechSDK.PropertyId.SpeechServiceConnection_AutoDetectSourceLanguageResult
+            ) || null;
+          } catch (_) {}
+        }
+        originals.push(e.result.text);
+        targetTCs.forEach(tc => {
+          const t = e.result.translations.get(tc);
+          if (t) transSegs[tc].push(t);
+        });
+        if (onProgress && !settled) onProgress(build());
+      }
+    },
+    hasData:   () => originals.length > 0,
+    getResult: build,
+  });
+  return { ...s, engine: 'speech', candidates };
+}
+
+// ===== 文脈（直前の発話）=====
+function pushHistory(loc, label, text) {
+  if (!text) return;
+  convHistory.push({ loc, label, text });
+  if (convHistory.length > 10) convHistory.shift();
+}
+function contextBlock() {
+  const n = cfg.ctxCount || 0;
+  if (!n || !convHistory.length) return '';
+  const lines = convHistory.slice(-n).map(h => `- ${h.label}（${nameOf(h.loc)}）: ${h.text}`);
+  return `直前の会話（訳さない）:\n${lines.join('\n')}\n\n`;
+}
+
+// ===== LLM 翻訳（Foundry / Azure OpenAI v1 Chat Completions）=====
+const LLM_TIMEOUT_MS = 6000;   // これを超えたら機械翻訳で代替する（多言語は 8 秒）
+
+function commonRules(srcName) {
+  const terms = getTerms();
+  return [
+    `・直訳ではなく、聞いて自然に意味が取れる話し言葉にする。語順は自然に組み替えてよい。`,
+    `・言いよどみ（um, uh, えーと など）や同じ語の繰り返しは省く。ただし要約はせず、話された内容はすべて訳す。`,
+    `・質問は質問として、依頼は依頼として訳す。丁寧さの度合いもできるだけ保つ。`,
+    `・製品名・サービス名・人名・社名は原語のまま残す。次の語は訳さない: ${terms.join(', ')}`,
+    ``,
+    `# 音声認識の誤りへの対処`,
+    `・発話は${srcName}の音声認識の結果で、聞き間違いを含むことがある。文脈と用語から本来の語を推測して訳す。`,
+    `・推測しても意味が通らない語句は、無理に訳さず省く。`,
+    ``,
+    `# 文脈の使い方`,
+    `・「直前の会話」は文脈を理解するためだけに使い、訳文には含めない。用語や言い回しはそろえる。`,
+  ];
+}
+const jaToneRule = () => cfg.tone === 'plain' ? '「だ・である」調' : '「です・ます」調の自然な話し言葉';
+
+function buildPairPrompt(srcLoc, tgtLoc) {
+  const srcName = nameOf(srcLoc), tgtName = nameOf(tgtLoc);
+  return [
+    `あなたは対面の会話を通訳する通訳者です。`,
+    `相手が${srcName}で話した内容を、聞き手に自然に伝わる${tgtName}に訳します。訳文はそのまま読み上げられます。`,
+    ``,
+    `# ルール`,
+    tcOf(tgtLoc) === 'ja' ? `・文体は${jaToneRule()}。` : null,
+    ...commonRules(srcName),
+    ``,
+    `# 出力`,
+    `・${tgtName}の訳文のみを出力する。説明・注釈・引用符・前置きは書かない。`,
+    `・発話全体が意味をなさない断片なら「…」だけを出力する。`,
+  ].filter(s => s !== null).join('\n');
+}
+
+function buildMultiPrompt(srcLoc, targets) {
+  const srcName = nameOf(srcLoc);
+  const codes = targets.map(tcOf);
+  const example = '{' + codes.map(c => `"${c}":"…"`).join(',') + '}';
+  return [
+    `あなたは複数の言語が飛び交う対面の会話を通訳する通訳者です。`,
+    `${srcName}で話された発話を、次の各言語に訳します: ${targets.map(l => `${tcOf(l)}（${nameOf(l)}）`).join('、')}`,
+    ``,
+    `# ルール`,
+    codes.includes('ja') ? `・日本語訳の文体は${jaToneRule()}。` : null,
+    ...commonRules(srcName),
+    ``,
+    `# 出力`,
+    `・JSON オブジェクトだけを出力する。キーは言語コード（${codes.join(', ')}）、値はその言語の訳文。`,
+    `・形式の例: ${example}`,
+    `・JSON 以外の文字（説明・コードブロックの記号）は書かない。`,
+    `・発話全体が意味をなさない断片なら、各値を「…」にする。`,
+  ].filter(s => s !== null).join('\n');
+}
+
+// 改行は読みにくいのでつなげる（日本語同士は空白なし、英字同士は空白1つ）
+function cleanLlmText(t) {
+  return String(t).trim()
+    .replace(/^"([^"]*)"$|^「([^「」]*)」$|^『([^『』]*)』$/, (m, a, b, c) => a ?? b ?? c)
+    .replace(/「」/g, '')
+    .replace(/[ \t]*\n+[ \t]*/g, (m, off, str) => (/[A-Za-z0-9]/.test(str[off - 1] || '') && /[A-Za-z0-9]/.test(str[off + m.length] || '')) ? ' ' : '')
+    .trim();
+}
+const isEmptyTranslation = t => /^[…\.\s。・]*$/.test(t || '');
+
+async function callLlm(system, user, effort, maxTok, timeoutMs, cost) {
+  const body = {
+    model: cfg.aoaiDeployment,
+    messages: [
+      { role: 'system', content: system },
+      { role: 'user',   content: user },
+    ],
+    max_completion_tokens: effort === 'none' ? maxTok : maxTok * 3,  // 推論トークンも含む上限
+    reasoning_effort: effort,
+  };
+  const ctrl  = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const res = await fetch(`${cfg.aoaiEndpoint}/openai/v1/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'api-key': cfg.aoaiKey },
+      body: JSON.stringify(body),
+      signal: ctrl.signal,
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const err = new Error(data?.error?.message || `HTTP ${res.status}`);
+      err.status = res.status;
+      throw err;
+    }
+    const u = data.usage || {};
+    cost.inTok  += u.prompt_tokens     || 0;
+    cost.outTok += u.completion_tokens || 0;
+    const text = String(data.choices?.[0]?.message?.content || '').trim();
+    if (!text) throw new Error('LLM の応答が空でした');
+    diag('llm', `✅ LLM OK（${effort}）`);
+    return text;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// reasoning_effort: none 非対応のモデルなら low に切り替えて再試行（以降は low を使う）
+async function callLlmWithFallback(system, user, maxTok, timeoutMs, cost) {
+  try {
+    return await callLlm(system, user, cfg.reasoningEffort, maxTok, timeoutMs, cost);
+  } catch (err) {
+    if (err.status === 400 && cfg.reasoningEffort === 'none' && /reasoning/i.test(err.message)) {
+      cfg.reasoningEffort = 'low';
+      SS.setItem('azCfg', JSON.stringify(cfg));
+      if (!effortFallbackNotified) {
+        effortFallbackNotified = true;
+        console.warn('reasoning_effort=none が使えないため low に切り替えました:', err.message);
+        diag('info', '推論「なし」非対応のため「低」に切替');
+      }
+      return await callLlm(system, user, 'low', maxTok, timeoutMs, cost);
+    }
+    throw err;
+  }
+}
+
+function llmFailReason(err) {
+  const why = err.name === 'AbortError' ? 'タイムアウト'
+            : (err instanceof TypeError ? '通信不可（URL・回線を確認）' : (err.status ? `HTTP ${err.status}: ${err.message}` : err.message));
+  const hint = (err.status === 401 || err.status === 404) ? '（エンドポイント・キー・デプロイ名を確認）' : '';
+  diag('llm', `❌ LLM 失敗: ${why}${hint} → 機械翻訳で代替`);
+  console.warn('LLM 翻訳失敗 → 機械翻訳で代替:', why);
+}
+
+// 1言語への翻訳（2話者モード）。戻り値 { text, engine: 'llm' | 'nmt' | 'source' }
+async function translateOne(original, fromLoc, toLoc, cost) {
+  const fromTC = tcOf(fromLoc), toTC = tcOf(toLoc);
+  if (fromTC === toTC) return { text: original, engine: 'llm' };
+  try {
+    const user = contextBlock() + `訳す発話（${nameOf(fromLoc)}）:\n${original}`;
+    const raw = await callLlmWithFallback(buildPairPrompt(fromLoc, toLoc), user, 800, LLM_TIMEOUT_MS, cost);
+    return { text: cleanLlmText(raw), engine: 'llm' };
+  } catch (err) {
+    llmFailReason(err);
+    try {
+      const t = await translateWithNmt(original, fromTC, [toTC], cost);
+      return { text: t[toTC] || original, engine: 'nmt' };
+    } catch (err2) {
+      console.warn('機械翻訳も失敗:', err2.message);
+      diag('llm', `❌ 翻訳失敗（原文を表示）: ${err2.message}`);
+      return { text: original, engine: 'source' };
+    }
+  }
+}
+
+// LLM の応答から JSON オブジェクトを取り出す（前後に余計な文字が付いても読めるように）
+function parseJsonObject(raw) {
+  const s = String(raw);
+  const a = s.indexOf('{'), b = s.lastIndexOf('}');
+  if (a < 0 || b <= a) throw new Error('JSON が見つかりません');
+  return JSON.parse(s.slice(a, b + 1));
+}
+
+// 複数言語への翻訳（多言語モード）。戻り値 { translations: { tc: text }, engine }
+async function translateMulti(original, fromLoc, targets, cost) {
+  const fromTC = tcOf(fromLoc);
+  const codes = [...new Set(targets.map(tcOf).filter(tc => tc !== fromTC))];
+  if (!codes.length) return { translations: {}, engine: 'llm' };
+  if (codes.length === 1) {
+    const loc = targets.find(l => tcOf(l) === codes[0]);
+    const r = await translateOne(original, fromLoc, loc, cost);
+    return { translations: { [codes[0]]: r.text }, engine: r.engine };
+  }
+  let translations = {}, missing = codes;
+  try {
+    const user = contextBlock() + `訳す発話（${nameOf(fromLoc)}）:\n${original}`;
+    const raw = await callLlmWithFallback(buildMultiPrompt(fromLoc, targets), user, 400 * codes.length, LLM_TIMEOUT_MS + 2000, cost);
+    const obj = parseJsonObject(raw);
+    codes.forEach(c => { if (typeof obj[c] === 'string' && obj[c].trim()) translations[c] = cleanLlmText(obj[c]); });
+    missing = codes.filter(c => !translations[c]);
+    if (!missing.length) return { translations, engine: 'llm' };
+    diag('llm', `⚠️ LLM の応答に ${missing.join(', ')} がないため機械翻訳で補完`);
+  } catch (err) {
+    llmFailReason(err);
+  }
+  try {
+    const t = await translateWithNmt(original, fromTC, missing, cost);
+    missing.forEach(c => { translations[c] = t[c] || original; });
+    return { translations, engine: Object.keys(translations).length > missing.length ? 'llm' : 'nmt' };
+  } catch (err2) {
+    console.warn('機械翻訳も失敗:', err2.message);
+    missing.forEach(c => { translations[c] = original; });
+    return { translations, engine: missing.length === codes.length ? 'source' : 'llm' };
+  }
+}
+
+// ===== 代替: Translator v3.0（Speech と同じマルチサービスキーで呼べる場合のみ）=====
+async function translateWithNmt(text, fromTC, toTCs, cost) {
+  const to  = toTCs.map(c => `&to=${encodeURIComponent(c)}`).join('');
+  const url = `https://api.cognitive.microsofttranslator.com/translate?api-version=3.0&from=${encodeURIComponent(fromTC)}${to}`;
+  const ctrl  = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 4000);
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Ocp-Apim-Subscription-Key':    cfg.speechKey,
+        'Ocp-Apim-Subscription-Region': cfg.speechRegion,
+      },
+      body: JSON.stringify([{ Text: text }]),
+      signal: ctrl.signal,
+    });
+    if (!res.ok) throw new Error(`Translator HTTP ${res.status}`);
+    const data = await res.json();
+    cost.nmtChars += text.length * toTCs.length;
+    const out = {};
+    (data?.[0]?.translations || []).forEach(t => { out[t.to] = t.text; });
+    return out;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// ===== 費用の概算（録音した秒数で数える）=====
+let pageYen = 0;                     // このページを開いてからの合計
+let costTotalYen = (() => { try { return parseFloat(LS.getItem('azCostTotalYen') || '0') || 0; } catch (_) { return 0; } })();
+function addCost(c) {
+  const audioRate = c.engine === 'speech' ? PRICE.nmtPerHourUsd : PRICE.sttPerHourUsd;
+  const usd = (c.audioSec / 3600) * audioRate
+            + (c.inTok  / 1e6) * PRICE.llmInPerMUsd
+            + (c.outTok / 1e6) * PRICE.llmOutPerMUsd
+            + (c.nmtChars / 1e6) * PRICE.nmtCharPerMUsd;
+  const yen = usd * PRICE.jpyPerUsd;
+  pageYen += yen;
+  costTotalYen += yen;
+  try { LS.setItem('azCostTotalYen', String(costTotalYen)); } catch (_) {}
+  renderCost();
+}
+function renderCost() {
+  const el = document.getElementById('costBadge');
+  if (!el) return;
+  const f = v => v < 10 ? v.toFixed(1) : Math.round(v).toLocaleString();
+  el.textContent = `💴 ¥${f(pageYen)} / 累計 ¥${f(costTotalYen)}`;
+  el.classList.toggle('warn', cfg.budgetWarn > 0 && costTotalYen >= cfg.budgetWarn);
+}
+function resetCostTotal() {
+  if (!confirm('対話版の累計の概算費用を 0 円に戻しますか？')) return;
+  costTotalYen = 0; pageYen = 0;
+  try { LS.setItem('azCostTotalYen', '0'); } catch (_) {}
+  renderCost();
+}
+
+// ===== TTS ディスパッチャ =====
+let speakingNow = false;
+async function tts(text, langCode) {
+  setAudioSession('playback');
+  speakingNow = true;
+  try {
+    await ((cfg.ttsEngine === 'azure') ? ttsAzure(text, langCode) : ttsWebSpeech(text, langCode));
+    diag('tts', '');
+  } catch (err) {
+    console.warn('読み上げ失敗:', err);
+    diag('tts', `❌ 読み上げ: ${err.message}`);
+  } finally {
+    speakingNow = false;
+  }
+}
+
+// 読み上げを途中で止める（次の人がすぐ話せるように）
+function stopSpeaking() {
+  ttsGen++;
+  try { window.speechSynthesis?.cancel(); } catch (_) {}
+  [...pendingSpeech].forEach(f => f());
+  const a = window._ttsAudioEl;
+  if (a && !a.paused) { try { a.pause(); a.dispatchEvent(new Event('ended')); } catch (_) {} }
+}
+
+// ★ Chrome では長い発話（目安15秒超）で speechSynthesis が無言のまま停止する既知問題があるため、
+//   文の区切りを目安に分割して順次読み上げる
+function splitForSpeech(text, maxLen = 120) {
+  const t = String(text).trim();
+  if (t.length <= maxLen) return t ? [t] : [];
+  const parts = [];
+  let buf = '';
+  for (let i = 0; i < t.length; i++) {
+    const c = t[i];
+    buf += c;
+    const sentenceEnd = '。！？!?\n'.includes(c) ||
+      (c === '.' && (i === t.length - 1 || t[i + 1] === ' '));
+    if ((sentenceEnd && buf.length >= 20) || buf.length >= maxLen) {
+      parts.push(buf);
+      buf = '';
+    }
+  }
+  if (buf.trim()) parts.push(buf);
+  return parts;
+}
+
+// ★ Web Speech API（ブラウザ内蔵）
+let ttsGen = 0; // 分割読み上げの世代管理（新しい読み上げ・停止で前の残りを破棄）
+function ttsWebSpeech(text, langCode) {
+  if (!window.speechSynthesis) {
+    return Promise.reject(new Error('このブラウザは Web Speech API に対応していません'));
+  }
+  const gen = ++ttsGen;
+  window.speechSynthesis.cancel();
+  let chain = Promise.resolve();
+  for (const chunk of splitForSpeech(text)) {
+    chain = chain.then(() => (gen === ttsGen ? speakWebChunk(chunk, langCode) : undefined));
+  }
+  return chain;
+}
+
+// 停止時や「終わった」合図が来ないブラウザでも待ちっぱなしにならないよう、
+// stopSpeaking() と時間切れ（文字数から見積もり）でも解除する
+const pendingSpeech = new Set();
+function speakWebChunk(text, langCode) {
+  return new Promise((resolve, reject) => {
+    let timer = null;
+    const finish = (err) => {
+      clearTimeout(timer);
+      pendingSpeech.delete(finish);
+      err ? reject(err) : resolve();
+    };
+    pendingSpeech.add(finish);
+    timer = setTimeout(() => finish(), 5000 + (text.length * 300) / currentRate);
+    const utt   = new SpeechSynthesisUtterance(text);
+    utt.lang    = langCode;
+    utt.rate    = currentRate;
+    utt.onend   = () => finish();
+    utt.onerror = (ev) => {
+      if (ev.error === 'interrupted' || ev.error === 'canceled') { finish(); return; }
+      finish(new Error(`Web Speech エラー: ${ev.error}`));
+    };
+    window.speechSynthesis.speak(utt);
+  });
+}
+
+// ★ Azure Neural TTS（高品質）。iOS 対策でロック解除済みの audio 要素を使い回す
+async function ttsAzure(text, langCode) {
+  const gen     = ++ttsGen;
+  const voice   = LANGS[langCode]?.voice || 'ja-JP-NanamiNeural';
+  const escaped = text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const ratePct = Math.round((currentRate - 1) * 100);
+  const rateAttr = `${ratePct >= 0 ? '+' : ''}${ratePct}%`;   // 例: 1.2倍 → +20%
+  const ssml    = `<speak version='1.0' xml:lang='${langCode}'><voice name='${voice}'><prosody rate='${rateAttr}'>${escaped}</prosody></voice></speak>`;
+
+  const res = await fetch(`https://${cfg.speechRegion}.tts.speech.microsoft.com/cognitiveservices/v1`, {
+    method: 'POST',
+    headers: {
+      'Ocp-Apim-Subscription-Key': cfg.speechKey,
+      'Content-Type': 'application/ssml+xml',
+      'X-Microsoft-OutputFormat': 'audio-24khz-48kbitrate-mono-mp3',
+    },
+    body: ssml,
+  });
+  if (!res.ok) throw new Error(`TTS エラー (${res.status})`);
+  const audioBlob = await res.blob();
+  if (gen !== ttsGen) return; // 取得中に止められた
+  const audioUrl  = URL.createObjectURL(audioBlob);
+
+  return new Promise((resolve, reject) => {
+    const audio = window._ttsAudioEl || (window._ttsAudioEl = new Audio());
+    audio.onended = () => { URL.revokeObjectURL(audioUrl); resolve(); };
+    audio.onerror = () => { URL.revokeObjectURL(audioUrl); reject(new Error('音声再生エラー')); };
+    audio.src = audioUrl;
+    audio.play().catch(err => { URL.revokeObjectURL(audioUrl); reject(err); });
+  });
+}
+
+// ===== UI Helpers =====
+function setStatus(sp, state) {
+  const el = document.getElementById(`status${sp}`);
+  const map = {
+    idle:       ['idle',       false, '待機中'],
+    recording:  ['recording',  true,  '録音中...'],
+    processing: ['processing', true,  '処理中...'],
+    speaking:   ['speaking',   true,  '再生中'],
+  };
+  const [cls, blink, label] = map[state] || map.idle;
+  el.className = `status-badge ${cls}`;
+  el.innerHTML = `<div class="dot${blink ? ' blink' : ''}"></div> ${label}`;
+}
+
+const ENGINE_MARK  = { llm: '', speech: '', nmt: '・機械翻訳（代替）', source: '・翻訳失敗（原文）' };
+const ENGINE_LABEL = { llm: 'LLM', speech: 'Speech翻訳', nmt: '機械翻訳(代替)', source: '翻訳失敗' };
+const STATE_LABEL  = { listening: '⏳ 認識中...', translating: '⏳ 翻訳中...' };
+
+// state: false（確定） | 'listening'（録音中の逐次表示） | 'translating'（LLM 待ち）
+function updateTranscript(sp, original, translated, toLang, state = false, engine = '') {
+  const el = document.getElementById(`transcript${sp}`);
+  const tName = nameOf(toLang);
+  lastTranslated[sp] = translated || '';
+  const mark = ENGINE_MARK[engine] ? ` <span class="engine-mark">${ENGINE_MARK[engine]}</span>` : '';
+  const pending = state === 'listening'
+    ? (cfg.engine === 'llm' ? '話し終わってボタンを押すと訳します' : '⏳ 翻訳中...')
+    : '⏳ 翻訳中...';
+  el.innerHTML = `
+    <div class="tr-label">認識テキスト${state ? ` <span style="color:var(--warn);text-transform:none;">${STATE_LABEL[state] || ''}</span>` : ''}</div>
+    <div class="tr-original">${esc(original || '')}</div>
+    ${translated != null ? `
+      <div class="tr-divider"></div>
+      <div class="tr-label" style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+        <span>→ ${tName}${mark}</span>
+        ${state ? '' : `<button class="btn-copy" onclick="copyTranslated('${sp}', this)" title="翻訳テキストをコピー">📋 コピー</button>`}
+      </div>
+      <div class="tr-translated">${esc(translated)}</div>
+    ` : `<div style="color:var(--warn);font-size:12px;margin-top:8px;">${pending}</div>`}
+  `;
+  el.scrollTop = el.scrollHeight;
+}
+
+// ===== 多言語モード: 結果表示 =====
+function updateTranscriptMulti(res, candidates, state = false) {
+  multiLast = res;
+  const el = document.getElementById('transcriptM');
+  const det = res.detectedLocale;
+  const detName = nameOf(det);
+  const mark = ENGINE_MARK[res.engine] ? ` <span class="engine-mark">${ENGINE_MARK[res.engine]}</span>` : '';
+
+  let html = `
+    <div class="tr-label">検出言語: ${detName}${state ? ` <span style="color:var(--warn);text-transform:none;">${STATE_LABEL[state] || ''}</span>` : ''}${mark}</div>
+    <div class="ml-row ml-detected">
+      <div class="ml-lang">🗣 ${detName}（原文）</div>
+      <div class="ml-text">${esc(res.original || '')}</div>
+    </div>`;
+
+  candidates.filter(l => l !== det).forEach(l => {
+    const tc   = tcOf(l);
+    const text = res.translations?.[tc];
+    html += `
+    <div class="ml-row">
+      <div class="ml-lang" style="display:flex;justify-content:space-between;align-items:center;gap:6px;">
+        <span>→ ${nameOf(l)}</span>
+        ${(!state && text) ? `<button class="btn-copy" onclick="copyMultiLang('${tc}', this)" title="この言語の翻訳をコピー">📋 コピー</button>` : ''}
+      </div>
+      <div class="ml-text">${text ? esc(text) : '<span style="color:var(--text-muted)">…</span>'}</div>
+    </div>`;
+  });
+
+  el.innerHTML = html;
+  el.scrollTop = el.scrollHeight;
+}
+
+function copyMultiLang(tc, btn) {
+  copyToClipboard(multiLast?.translations?.[tc] ?? '', btn);
+}
+
+function nowStamp() {
+  const now = new Date();
+  return {
+    time: now.toLocaleTimeString('ja-JP', { hour:'2-digit', minute:'2-digit', second:'2-digit' }),
+    date: now.toLocaleDateString('ja-JP', { year:'numeric', month:'2-digit', day:'2-digit' }),
+  };
+}
+const srcName  = sp => ({ system: 'システム音声', mix: 'ミックス' })[sourceMode[sp]] || 'マイク';
+const srcIcon  = sp => ({ system: '🖥', mix: '🎧' })[sourceMode[sp]] || '🎤';
+
+function prependLogEntry(entry) {
+  const body = document.getElementById('logBody');
+  body.querySelector('.log-empty')?.remove();
+  body.prepend(entry);
+  body.scrollTop = 0;
+  // ★ 表示は直近 MAX_LOG_DOM 件まで（古い行のDOMのみ削除。CSV出力データは全件保持）
+  while (body.children.length > MAX_LOG_DOM) body.lastElementChild.remove();
+}
+
+// ===== 多言語モード: ログ追加 =====
+function addLogMulti(res, candidates) {
+  logCount++;
+  document.getElementById('logCount').textContent = logCount;
+  const { time, date } = nowStamp();
+  const det    = res.detectedLocale;
+  const others = candidates.filter(l => l !== det);
+  const toNames = others.map(nameOf).join(', ');
+  const joined = others.map(l => {
+    const t = res.translations[tcOf(l)];
+    return t ? `[${nameOf(l)}] ${t}` : null;
+  }).filter(Boolean).join('\n');
+
+  logData.push({
+    no: logCount, date, time,
+    speaker:    '多言語',
+    source:     srcName('M'),
+    fromLang:   nameOf(det),
+    toLang:     toNames,
+    engine:     ENGINE_LABEL[res.engine] || '',
+    original:   res.original,
+    translated: joined,
+  });
+
+  const entry = document.createElement('div');
+  entry.className = 'log-entry from-m';
+  entry.innerHTML = `
+    <button class="btn-copy" onclick="copyLogEntry(${logData.length - 1}, this)" title="翻訳テキストをコピー">📋</button>
+    <div class="log-original">${esc(res.original)}</div>
+    ${others.map(l => {
+      const t = res.translations[tcOf(l)];
+      return t ? `<div class="log-translated">→ [${nameOf(l)}] ${esc(t)}</div>` : '';
+    }).join('')}
+    <div class="log-meta">🌏 多言語 ${srcIcon('M')} ｜ ${nameOf(det)} → ${toNames} ｜ ${ENGINE_LABEL[res.engine] || ''} ｜ ${time}</div>
+  `;
+  prependLogEntry(entry);
+}
+
+// ===== クリップボードコピー =====
+function copyTranslated(sp, btn) {
+  copyToClipboard(lastTranslated[sp], btn);
+}
+
+function copyLogEntry(idx, btn) {
+  copyToClipboard(logData[idx]?.translated ?? '', btn);
+}
+
+async function copyToClipboard(text, btn) {
+  if (!text) return;
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity  = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    ta.remove();
+  }
+  const orig = btn.textContent;
+  btn.textContent = '✓ コピー済';
+  btn.classList.add('copied');
+  setTimeout(() => { btn.textContent = orig; btn.classList.remove('copied'); }, 1500);
+}
+
+function showError(sp, msg) {
+  const el = document.getElementById(`transcript${sp}`);
+  el.innerHTML = `<div style="color:var(--error);font-size:13px;line-height:1.6;">⚠️ ${esc(msg)}</div>`;
+}
+
+function addLog(sp, original, translated, fromLang, toLang, engine = 'speech') {
+  logCount++;
+  document.getElementById('logCount').textContent = logCount;
+  const { time, date } = nowStamp();
+
+  logData.push({
+    no: logCount, date, time,
+    speaker:    `話者${sp}`,
+    source:     srcName(sp),
+    fromLang:   nameOf(fromLang),
+    toLang:     nameOf(toLang),
+    engine:     ENGINE_LABEL[engine] || '',
+    original,
+    translated,
+  });
+
+  const entry = document.createElement('div');
+  entry.className = `log-entry from-${sp.toLowerCase()}`;
+  entry.innerHTML = `
+    <button class="btn-copy" onclick="copyLogEntry(${logData.length - 1}, this)" title="翻訳テキストをコピー">📋</button>
+    <div class="log-original">${esc(original)}</div>
+    <div class="log-translated">→ ${esc(translated)}</div>
+    <div class="log-meta">話者 ${sp} ${srcIcon(sp)} ｜ ${nameOf(fromLang)} → ${nameOf(toLang)} ｜ ${ENGINE_LABEL[engine] || ''} ｜ ${time}</div>
+  `;
+  prependLogEntry(entry);
+}
+
+function clearLog() {
+  if (logData.length && !confirm('会話ログを消去しますか？（CSV に保存していない分は戻せません）')) return;
+  logCount = 0;
+  logData  = [];
+  convHistory = [];
+  document.getElementById('logCount').textContent = '0';
+  document.getElementById('logBody').innerHTML = '<div class="log-empty">会話を開始すると、ここに履歴が表示されます</div>';
+}
+
+// iOS はリンクの解放をすぐ行うと保存に失敗するため、30秒遅らせる
+function saveBlob(blob, name) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 30000);
+}
+
+function downloadCSV() {
+  if (logData.length === 0) { alert('出力するログがありません。'); return; }
+  const cell = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
+  const header = ['No', '日付', '時刻', '話者', '入力ソース', '発話言語', '翻訳先言語', '翻訳エンジン', '発話テキスト', '翻訳テキスト'];
+  const rows   = logData.map(r => [
+    r.no, r.date, r.time, r.speaker, r.source, r.fromLang, r.toLang, r.engine, r.original, r.translated
+  ].map(cell).join(','));
+  const csv  = '﻿' + [header.map(cell).join(','), ...rows].join('\r\n'); // BOM付き（Excel 用）
+  const d = new Date(), z = n => String(n).padStart(2, '0');
+  const ts = `${d.getFullYear()}-${z(d.getMonth() + 1)}-${z(d.getDate())}-${z(d.getHours())}${z(d.getMinutes())}`;
+  saveBlob(new Blob([csv], { type: 'text/csv;charset=utf-8;' }), `conversation-log-${ts}.csv`);
+}
+
+function esc(t) {
+  return String(t ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ===== 起動時の初期化（すべての関数・変数の定義後に実行）=====
+(function init() {
+  { const v = document.getElementById('appVersion'); if (v) v.textContent = `版 ${APP_VERSION}`; }
+  applyPlatformRestrictions();
+  refreshTtsOptions();
+  updateTtsToggleUI();
+
+  const fromFile  = readConfigFile();
+  const shared    = pick(readJson(LS, 'lvSavedCfg'), SHARED_KEYS); // ライブ版と共通のキー
+  const own       = readJson(LS, 'azSavedCfg');                    // 対話版だけの設定
+  const session   = readJson(SS, 'azCfg');                         // このタブで変更した値
+  // 優先順位: 既定値 < 設定ファイル < この端末に保存した値 < このタブで設定画面から変更した値
+  cfg = { ...DEFAULT_CFG, ...fromFile, ...shared, ...(own || {}), ...(session || {}) };
+  if (session && session.engine === undefined) cfg.engine = DEFAULT_CFG.engine; // 旧形式（Speech キーのみ）との互換
+
+  applyUiMode(getUiMode());
+  applyFace();
+  updateEngineBadge();
+  renderCost();
+
+  if (isReady(cfg)) {
+    document.getElementById('settingsModal').style.display = 'none';
+    loadMicDevices();
+    if (!session) {
+      if (Object.keys(shared).length) diag('info', 'この端末に保存した設定を読み込みました');
+      else if (Object.keys(fromFile).length) diag('info', '設定ファイルを読み込みました');
+    }
+  } else {
+    openSettings();
+  }
+})();
+
+</script>
+</body>
+</html>
