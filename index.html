@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>登壇翻訳 LIVE | Azure AI</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@300;400;500;700&family=Barlow:ital,wght@0,400;0,600;0,700;0,900;1,400&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -512,15 +512,26 @@ header {
   position: fixed; inset: 0; z-index: 300; background: #000;
   display: none; flex-direction: column; align-items: center; justify-content: center;
 }
-.cam-overlay video { width: 100%; flex: 1; min-height: 0; object-fit: contain; background: #000; }
-.cam-bar { width: 100%; display: flex; align-items: center; justify-content: space-between; padding: 14px 22px 26px; gap: 12px; }
+.cam-overlay video { background: #000; }
+.cam-bar { width: 100%; display: flex; align-items: center; justify-content: space-between; padding: 14px 22px max(26px, calc(env(safe-area-inset-bottom) + 12px)); gap: 12px; flex-shrink: 0; }
+.cam-tools, .cam-note { flex-shrink: 0; }
+.cam-overlay { height: 100vh; height: 100dvh; }
 .cam-bar button.cam-close { padding: 10px 16px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.3); background: transparent; color: #fff; font-size: 15px; }
 .cam-shutter { width: 72px; height: 72px; border-radius: 50%; border: 5px solid #fff; background: #ef4444; cursor: pointer; }
 .cam-shutter:active { transform: scale(0.94); }
 .cam-info { color: #cbd5e1; font-size: 13px; min-width: 70px; text-align: right; }
 .cam-note { color: #94a3b8; font-size: 12px; padding: 8px 16px 0; text-align: center; }
 .cam-flash { position: fixed; inset: 0; background: #fff; opacity: 0; pointer-events: none; z-index: 310; transition: opacity 0.25s; }
-.photo-view img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.photo-view img { max-width: 100%; max-height: calc(100% - 70px); object-fit: contain; }
+.cam-view { position: relative; width: 100%; flex: 1; min-height: 0; overflow: hidden; }
+.cam-view video { width: 100%; height: 100%; object-fit: contain; transform-origin: center center; transition: transform 0.15s; }
+.cam-tools { width: 100%; display: flex; align-items: center; justify-content: center; gap: 8px; padding: 10px 12px 0; flex-wrap: wrap; }
+.cam-tools button { padding: 7px 13px; border-radius: 18px; border: 1px solid rgba(255,255,255,0.35); background: rgba(255,255,255,0.08); color: #fff; font-size: 14px; min-width: 46px; }
+.cam-tools button.on { background: #fbbf24; color: #111; border-color: #fbbf24; font-weight: 700; }
+.cam-tools .cam-orient { min-width: 120px; }
+.cam-badge { position: absolute; left: 50%; top: 10px; transform: translateX(-50%); background: rgba(0,0,0,0.6); color: #fde68a; font-size: 12px; padding: 3px 10px; border-radius: 12px; pointer-events: none; }
+.pv-bar { display: flex; gap: 10px; padding: 12px; }
+.pv-bar button { padding: 9px 16px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.35); background: rgba(255,255,255,0.08); color: #fff; font-size: 15px; }
 .photo-view { cursor: zoom-out; }
 
 /* Scrollbar */
@@ -753,8 +764,17 @@ body.mobile .field input, body.mobile .field select { font-size: 16px; } /* iOS 
 
 <!-- ===== CAMERA (iPhone) ===== -->
 <div class="cam-overlay" id="camOverlay">
-  <div class="cam-note">会場のスクリーンに向けて撮影してください。撮影中も翻訳は続きます</div>
-  <video id="camVideo" playsinline muted autoplay></video>
+  <div class="cam-note">スクリーンに向けて撮影。撮影中も翻訳は続きます</div>
+  <div class="cam-view">
+    <video id="camVideo" playsinline muted autoplay></video>
+    <div class="cam-badge" id="camBadge"></div>
+  </div>
+  <div class="cam-tools">
+    <button class="cam-zoom on" data-z="1" onclick="setCamZoom(1)">1x</button>
+    <button class="cam-zoom" data-z="2" onclick="setCamZoom(2)">2x</button>
+    <button class="cam-zoom" data-z="3" onclick="setCamZoom(3)">3x</button>
+    <button class="cam-orient" id="camOrientBtn" onclick="cycleCamOrient()">向き：自動</button>
+  </div>
   <div class="cam-bar">
     <button class="cam-close" onclick="closeCamera()">閉じる</button>
     <button class="cam-shutter" onclick="shootCamera()" aria-label="撮影"></button>
@@ -762,7 +782,13 @@ body.mobile .field input, body.mobile .field select { font-size: 16px; } /* iOS 
   </div>
 </div>
 <div class="cam-flash" id="camFlash"></div>
-<div class="photo-view" id="photoView" onclick="this.style.display='none'"><img id="photoViewImg" alt=""></div>
+<div class="photo-view" id="photoView">
+  <img id="photoViewImg" alt="" onclick="closePhotoView()">
+  <div class="pv-bar">
+    <button onclick="rotateViewedPhoto()">↻ 90°回転</button>
+    <button onclick="closePhotoView()">閉じる</button>
+  </div>
+</div>
 
 <!-- ===== HEADER ===== -->
 <header>
@@ -2235,7 +2261,8 @@ function renderRecord(rec) {
         <img class="hist-thumb" alt="写真 ${rec.no}" src="${rec.dataUrl}">
         <div class="hist-original">${rec.source === 'camera' ? '📷 写真' : '📸 スクショ'}</div>
       </div>`;
-    entry.querySelector('img').addEventListener('click', () => viewPhoto(rec.dataUrl));
+    entry.dataset.no = rec.no;
+    entry.querySelector('img').addEventListener('click', () => viewPhoto(rec));
   } else {
     entry.className = 'hist-entry';
     entry.innerHTML = `
@@ -2249,9 +2276,35 @@ function renderRecord(rec) {
   body.scrollTop = body.scrollHeight;
 }
 
-function viewPhoto(dataUrl) {
-  document.getElementById('photoViewImg').src = dataUrl;
+let viewedRec = null;
+function viewPhoto(rec) {
+  viewedRec = rec;
+  document.getElementById('photoViewImg').src = rec.dataUrl;
   document.getElementById('photoView').style.display = 'flex';
+}
+function closePhotoView() {
+  viewedRec = null;
+  document.getElementById('photoView').style.display = 'none';
+}
+// 保存済みの写真を時計回りに90°回転（向きの自動判定が外れたときの手直し用）
+function rotateViewedPhoto() {
+  const rec = viewedRec;
+  if (!rec) return;
+  const img = new Image();
+  img.onload = () => {
+    const c = document.createElement('canvas');
+    c.width = img.height; c.height = img.width;
+    const g = c.getContext('2d');
+    g.translate(c.width / 2, c.height / 2);
+    g.rotate(Math.PI / 2);
+    g.drawImage(img, -img.width / 2, -img.height / 2);
+    rec.dataUrl = c.toDataURL('image/jpeg', 0.85);
+    TL.put(rec);
+    document.getElementById('photoViewImg').src = rec.dataUrl;
+    const thumb = document.querySelector(`#histBody .hist-entry[data-no="${rec.no}"] img`);
+    if (thumb) thumb.src = rec.dataUrl;
+  };
+  img.src = rec.dataUrl;
 }
 
 function clearHistory() {
@@ -2374,13 +2427,20 @@ async function restoreTimeline() {
 // ===== 撮影（PC: 画面共有中のスクショ／iPhone: ページ内カメラ）=====
 const SHOT_MAX_SIDE = 1600;   // 長辺をこのピクセルに縮小して JPEG 保存（1枚 約150〜300KB）
 
-function frameToDataUrl(video) {
+// zoom: デジタルズーム倍率（中央を切り出す）。rotate: 0 / 90（時計回り）/ -90（反時計回り）
+function frameToDataUrl(video, { zoom = 1, rotate = 0 } = {}) {
   const w = video.videoWidth, h = video.videoHeight;
   if (!w || !h) throw new Error('映像がまだ届いていません');
-  const k = Math.min(1, SHOT_MAX_SIDE / Math.max(w, h));
+  const sw = w / zoom, sh = h / zoom, sx = (w - sw) / 2, sy = (h - sh) / 2;
+  const k = Math.min(1, SHOT_MAX_SIDE / Math.max(sw, sh));
+  const dw = Math.round(sw * k), dh = Math.round(sh * k);
+  const turned = rotate === 90 || rotate === -90;
   const c = document.createElement('canvas');
-  c.width = Math.round(w * k); c.height = Math.round(h * k);
-  c.getContext('2d').drawImage(video, 0, 0, c.width, c.height);
+  c.width = turned ? dh : dw; c.height = turned ? dw : dh;
+  const g = c.getContext('2d');
+  g.translate(c.width / 2, c.height / 2);
+  if (rotate) g.rotate(rotate * Math.PI / 180);
+  g.drawImage(video, sx, sy, sw, sh, -dw / 2, -dh / 2, dw, dh);
   return c.toDataURL('image/jpeg', 0.82);
 }
 
@@ -2438,10 +2498,93 @@ async function takeShot() {
 }
 
 let camStream = null, camShots = 0;
+let camZoom = 1, camHwZoom = false;          // camHwZoom: カメラ側のズームが使えるか
+let camOrient = 'auto';                      // 'auto' | 'right' | 'left' | 'none'
+let gravity = { x: 0, y: 0, ok: false };     // 端末の傾き（縦向きロックでも物理的な向きが分かる）
+const ORIENT_LABEL = { auto: '向き：自動', right: '向き：横（右回転）', left: '向き：横（左回転）', none: '向き：そのまま' };
+
+function onDeviceMotion(e) {
+  const a = e.accelerationIncludingGravity;
+  if (!a || a.x == null) return;
+  // iOS は Android（仕様どおり）と符号が逆なので、仕様の向きにそろえる
+  const s = isIOSDevice() ? -1 : 1;
+  gravity = { x: a.x * s, y: a.y * s, ok: true };
+  updateCamBadge();
+}
+
+async function enableMotion() {
+  try {
+    if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
+      const r = await DeviceMotionEvent.requestPermission();   // iOS はタップの中で許可を求める必要がある
+      if (r !== 'granted') return false;
+    }
+    window.removeEventListener('devicemotion', onDeviceMotion);
+    window.addEventListener('devicemotion', onDeviceMotion);
+    return true;
+  } catch (_) { return false; }
+}
+
+// 撮影時の回転角。映像が縦長のときだけ、端末を横に構えていれば横向きに直す
+function shotRotation(video) {
+  if (camOrient === 'right') return 90;
+  if (camOrient === 'left') return -90;
+  if (camOrient === 'none') return 0;
+  if (!video || video.videoHeight <= video.videoWidth) return 0;   // すでに横長の映像なら補正しない
+  if (!gravity.ok || Math.abs(gravity.x) < 6 || Math.abs(gravity.x) < Math.abs(gravity.y)) return 0;
+  // 端末の右側が上 → 映像の右端が上 → 反時計回りに90°／左側が上 → 時計回りに90°
+  return gravity.x > 0 ? -90 : 90;
+}
+
+function updateCamBadge() {
+  const b = document.getElementById('camBadge');
+  if (!b || document.getElementById('camOverlay').style.display !== 'flex') return;
+  const r = shotRotation(document.getElementById('camVideo'));
+  const z = camZoom > 1 ? `${camZoom}倍${camHwZoom ? '' : '（デジタル）'}` : '';
+  const o = r ? '横向きで保存' : '';
+  b.textContent = [z, o].filter(Boolean).join('・');
+  b.style.display = b.textContent ? '' : 'none';
+}
+
+function cycleCamOrient() {
+  const order = ['auto', 'right', 'left', 'none'];
+  camOrient = order[(order.indexOf(camOrient) + 1) % order.length];
+  document.getElementById('camOrientBtn').textContent = ORIENT_LABEL[camOrient];
+  try { LS.setItem('lvCamOrient', camOrient); } catch (_) {}
+  if (camOrient === 'auto' && !gravity.ok) enableMotion();
+  updateCamBadge();
+}
+
+async function setCamZoom(z) {
+  camZoom = z;
+  document.querySelectorAll('.cam-zoom').forEach(b => b.classList.toggle('on', Number(b.dataset.z) === z));
+  const v = document.getElementById('camVideo');
+  const track = camStream?.getVideoTracks()[0];
+  const caps = track?.getCapabilities ? track.getCapabilities() : {};
+  if (caps && caps.zoom && caps.zoom.max >= 1) {
+    // カメラ側のズーム（画質が落ちない）
+    try {
+      await track.applyConstraints({ advanced: [{ zoom: Math.min(z, caps.zoom.max) }] });
+      camHwZoom = true;
+      v.style.transform = '';
+      updateCamBadge();
+      return;
+    } catch (_) {}
+  }
+  // デジタルズーム（中央を切り出す）。プレビューも同じ倍率で拡大表示
+  camHwZoom = false;
+  v.style.transform = z > 1 ? `scale(${z})` : '';
+  updateCamBadge();
+}
+
 async function openCamera() {
+  try { camOrient = LS.getItem('lvCamOrient') || 'auto'; } catch (_) { camOrient = 'auto'; }
+  if (!ORIENT_LABEL[camOrient]) camOrient = 'auto';
+  document.getElementById('camOrientBtn').textContent = ORIENT_LABEL[camOrient];
+  if (camOrient === 'auto') enableMotion();   // 最初の await より前（タップの中）で許可を求める
   try {
     camStream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } },
+      // デジタルズームでも画質が残るよう、できるだけ高い解像度を要求
+      video: { facingMode: { ideal: 'environment' }, width: { ideal: 3840 }, height: { ideal: 2160 } },
       audio: false,
     });
   } catch (e) {
@@ -2454,12 +2597,15 @@ async function openCamera() {
   v.srcObject = camStream;
   v.play().catch(() => {});
   document.getElementById('camOverlay').style.display = 'flex';
+  setCamZoom(1);
+  v.onloadedmetadata = updateCamBadge;
   keepAudioAlive();
 }
 
 function shootCamera() {
   try {
-    addPhotoRecord(frameToDataUrl(document.getElementById('camVideo')), 'camera');
+    const v = document.getElementById('camVideo');
+    addPhotoRecord(frameToDataUrl(v, { zoom: camHwZoom ? 1 : camZoom, rotate: shotRotation(v) }), 'camera');
     camShots++;
     document.getElementById('camInfo').textContent = `${camShots}枚 撮影`;
     flashShot();
@@ -2472,7 +2618,9 @@ function shootCamera() {
 function closeCamera() {
   if (camStream) camStream.getTracks().forEach(t => t.stop());
   camStream = null;
-  document.getElementById('camVideo').srcObject = null;
+  const cv = document.getElementById('camVideo');
+  cv.srcObject = null;
+  cv.style.transform = '';
   document.getElementById('camOverlay').style.display = 'none';
   keepAudioAlive();
   if (camShots) setStatus(`📷 写真${camShots}枚を字幕ログに追加しました`);
