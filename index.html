@@ -1043,7 +1043,7 @@ const DEFAULT_TERMS = [
   'SharePoint', 'Microsoft Teams', 'Microsoft Entra', 'Managed Environments',
   'MCP', 'ALM', 'DLP', 'CoE Starter Kit',
   'Agent 365', 'Copilot Studio Kit', 'Power Platform admin center', 'Windows 365', 'GitHub Copilot',
-  'Microsoft Graph', 'Microsoft Purview', 'Azure AI Foundry', 'Model Context Protocol',
+  'Microsoft Graph', 'Microsoft Purview', 'Azure AI Foundry', 'Model Context Protocol', 'Power CAT', 'Git',
 ];
 // 音声認識のヒント専用（訳では日本語にしてよい一般語）。会期中によく出る語
 const HINT_TERMS = [
@@ -1876,7 +1876,8 @@ function buildSystemPrompt(srcCode, tgtCode) {
     ``,
     `# 音声認識の誤りへの対処`,
     `・発話は音声認識の結果で、単語の聞き間違いが多い。文脈・セッションの話題・用語から、本来の語を推測して訳す。`,
-    `・よくある例: "Indian skills"/"engine skills"→agent skills、"skin"/"scale"/"spill"→skill、"pilot studio"/"Copilot who"→Copilot Studio、"MCTS"→MCPs、"admiral"/"athletes"→admins、"plugging"→plugin。`,
+    `・よくある例: "Indian skills"/"engine skills"→agent skills、"skin"/"scale"/"spill"→skill、"pilot studio"/"Copilot who"→Copilot Studio、"MCTS"→MCPs、"admiral"/"athletes"→admins、"plugging"→plugin、"patient(s)"→agent(s)、"XP server"/"CP server"→MCP server、"Papa Form"/"Pop platform"→Power Platform、"Power Cat"/"Power cut"/"Power CAD"→Power CAT、"kids"/"heat"/"dose"→Git、"alien"/"A and N"→ALM、"PPAC"/"P back"→Power Platform admin center。`,
+    `・名前が聞き取れず不明なときは、空のかぎかっこ（「」）を書かずに「新しい機能」のように言い換える。`,
     `・推測しても意味が通らない語句は、無理に訳さず省く（「アルコール」「スパイシー」のような話題と無関係な語を作らない）。`,
     `・発話全体が意味をなさない断片（"And I." "That's very, very." など）なら「…」だけを出力する。`,
     ``,
@@ -1893,7 +1894,10 @@ function buildSystemPrompt(srcCode, tgtCode) {
 // 改行は字幕では邪魔なのでつなげる（日本語同士は空白なし、英字同士は空白1つ）
 function cleanLlmText(t) {
   return String(t).trim()
-    .replace(/^["「『]|["」』]$/g, '')
+    .replace(/^"([^"]*)"$|^「([^「」]*)」$|^『([^『』]*)』$/, (m, a, b, c) => a ?? b ?? c)   // 全体を囲む引用符だけ外す
+    .replace(/[【】]/g, '')                                   // モデルがまれに付ける記号のゴミ
+    .replace(/[\u0900-\u0DFF\u0E00-\u0EFF\u0600-\u06FF]+/g, '') // まれに混ざる他言語の文字（ベンガル文字など）
+    .replace(/「」/g, '')
     .replace(/[ \t]*\n+[ \t]*/g, (m, off, str) => (/[A-Za-z0-9]/.test(str[off - 1] || '') && /[A-Za-z0-9]/.test(str[off + m.length] || '')) ? ' ' : '')
     .trim();
 }
