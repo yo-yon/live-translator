@@ -782,7 +782,7 @@ body.mobile .field input, body.mobile .field select { font-size: 16px; } /* iOS 
     <div class="field">
       <label>📌 用語集（認識ヒント＋英語のまま残す語）</label>
       <textarea id="phraseHints"
-        placeholder="1行に1語（Power Platform 系の主要製品名は登録済み）&#10;登壇者名・セッション固有の用語を追加&#10;例: Managed Environments"
+        placeholder="1行に1語（Power Platform・Microsoft 365・Azure の主な製品名は登録済み）&#10;登壇者名・セッション固有の用語を追加&#10;例: Managed Environments"
         style="width:100%;height:72px;padding:10px 13px;
                background:rgba(255,255,255,0.04);
                border:1px solid rgba(255,255,255,0.08);
@@ -1046,16 +1046,41 @@ const PRICE = {
 
 // Power Platform カンファレンス向けの既定用語（英語のまま残す・認識ヒントにも使う）
 // 画面で今どの版が動いているか確認するための版番号（更新のたびに上げる）
-const APP_VERSION = '2026-10-28.4';
+const APP_VERSION = '2026-10-28.5';
 { const v = document.getElementById('appVersion'); if (v) v.textContent = `版 ${APP_VERSION}`; }
 const DEFAULT_TERMS = [
-  'Power Platform', 'Power Apps', 'Power Automate', 'Power BI', 'Power Pages', 'Power Fx',
-  'Copilot Studio', 'Microsoft Copilot', 'Microsoft 365 Copilot', 'Copilot', 'Dataverse',
-  'Microsoft Fabric', 'Azure', 'Azure OpenAI', 'Microsoft Foundry', 'Dynamics 365',
-  'SharePoint', 'Microsoft Teams', 'Microsoft Entra', 'Managed Environments',
-  'MCP', 'ALM', 'DLP', 'CoE Starter Kit',
-  'Agent 365', 'Copilot Studio Kit', 'Power Platform admin center', 'Windows 365', 'GitHub Copilot',
-  'Microsoft Graph', 'Microsoft Purview', 'Azure AI Foundry', 'Model Context Protocol', 'Power CAT', 'Git',
+  // --- Power Platform / Dynamics 365 ---
+  'Power Platform', 'Power Apps', 'Power Automate', 'Power BI', 'Power Pages', 'Power Fx', 'Power Query',
+  'Copilot Studio', 'Copilot Studio Kit', 'Dataverse', 'Dataverse for Teams', 'Dataverse MCP server',
+  'canvas apps', 'model-driven apps', 'code apps', 'Power Apps component framework', 'PCF',
+  'cloud flows', 'desktop flows', 'Power Automate Desktop', 'process mining', 'AI Builder', 'Plan designer',
+  'Managed Environments', 'Power Platform admin center', 'PPAC', 'Power Platform pipelines', 'Power Platform CLI',
+  'pac CLI', 'Power Platform Build Tools', 'solution checker', 'environment groups', 'custom connectors',
+  'on-premises data gateway', 'Copilot Credits', 'CoE Starter Kit', 'Power CAT', 'ALM', 'DLP', 'Git',
+  'Dynamics 365', 'Dynamics 365 Sales', 'Dynamics 365 Customer Service', 'Dynamics 365 Field Service',
+  'Dynamics 365 Contact Center', 'Dynamics 365 Customer Insights', 'Business Central',
+  // --- Microsoft 365 ---
+  'Microsoft 365', 'Microsoft 365 Copilot', 'Microsoft 365 Copilot Chat', 'Copilot Chat', 'Microsoft Copilot',
+  'Copilot', 'Agent 365', 'Work IQ', 'Copilot connectors', 'Graph connectors', 'Microsoft Graph',
+  'Copilot Control System', 'Agent Store', 'Researcher', 'Analyst', 'Copilot Notebooks', 'Copilot Pages',
+  'declarative agents', 'SharePoint agents', 'Microsoft 365 Agents SDK', 'Microsoft 365 Agents Toolkit',
+  'Teams Toolkit', 'Microsoft Teams', 'SharePoint', 'SharePoint Embedded', 'OneDrive', 'Outlook',
+  'Exchange Online', 'Microsoft Loop', 'Microsoft Lists', 'Microsoft Planner', 'Microsoft Forms',
+  'Microsoft Bookings', 'Viva Engage', 'Viva Insights', 'Viva Connections', 'Microsoft 365 admin center',
+  'Teams admin center', 'Microsoft Entra', 'Entra ID', 'Microsoft Intune', 'Microsoft Purview',
+  'Microsoft Defender', 'Microsoft Sentinel', 'Windows 365', 'Microsoft Edge', 'Microsoft Fabric', 'OneLake',
+  'Fabric IQ',
+  // --- Azure / AI ---
+  'Azure', 'Microsoft Foundry', 'Azure AI Foundry', 'Foundry Agent Service', 'Foundry IQ', 'Foundry Tools',
+  'Azure OpenAI', 'Azure AI Search', 'Azure Speech', 'Azure Translator', 'Azure AI Document Intelligence',
+  'Azure AI Content Understanding', 'Azure Machine Learning', 'Azure Functions', 'Azure Logic Apps',
+  'Azure API Management', 'Azure Container Apps', 'Azure Kubernetes Service', 'AKS', 'Azure App Service',
+  'Azure Cosmos DB', 'Azure SQL Database', 'Azure Blob Storage', 'Azure Key Vault', 'Azure Service Bus',
+  'Azure Event Grid', 'Azure Event Hubs', 'Azure Data Factory', 'Azure Databricks', 'Azure Arc',
+  'Azure Monitor', 'Application Insights', 'Microsoft Defender for Cloud', 'Azure Policy', 'Azure Resource Graph',
+  'Azure Virtual Desktop', 'Azure DevOps', 'Bicep', 'Microsoft Agent Framework', 'Semantic Kernel',
+  'Model Context Protocol', 'MCP', 'Azure MCP Server', 'GitHub', 'GitHub Copilot', 'GitHub Actions',
+  'Visual Studio Code', 'VS Code',
 ];
 // 音声認識のヒント専用（訳では日本語にしてよい一般語）。会期中によく出る語
 const HINT_TERMS = [
@@ -1064,6 +1089,13 @@ const HINT_TERMS = [
   'generative orchestration', 'autonomous agents', 'multi-agent', 'orchestration', 'maker', 'makers',
   'admin', 'admins', 'environment', 'environments', 'solution', 'solutions', 'pipelines', 'governance',
   'cloud PC', 'hosted browser', 'prompt', 'grounding', 'low-code', 'pro-code', 'Power Platform Community Conference',
+  'tenant', 'tenants', 'service principal', 'managed identity', 'connection references', 'environment variables',
+  'delegation', 'delegable', 'throttling', 'API limits', 'service protection limits', 'security roles',
+  'business units', 'row-level security', 'Dataverse tables', 'lookup', 'gallery', 'Patch', 'ForAll',
+  'Collect', 'child flows', 'trigger conditions', 'unattended', 'attended', 'RPA', 'API', 'APIs', 'OData',
+  'fusion teams', 'citizen developers', 'pro developers', 'Center of Excellence', 'oversharing',
+  'sensitivity labels', 'evals', 'agent evaluation', 'human in the loop', 'RAG', 'LLM', 'SLM', 'fine-tuning',
+  'tokens', 'inference', 'hallucination', 'responsible AI', 'telemetry', 'inventory', 'lifecycle',
 ];
 const SEG_MS = { meeting: '800', standard: '1200', presentation: '2000' };
 const MODE_LABEL = { meeting: '会議', standard: '標準', presentation: '登壇' };
@@ -1206,7 +1238,8 @@ function getUserTerms() {
 }
 function getPhraseList() {
   // 既定の製品名 + ユーザー追加分（重複除去）
-  return [...new Set([...DEFAULT_TERMS, ...getUserTerms(), ...HINT_TERMS])].slice(0, 500);
+  // 利用者が足した語を先頭に（上限で切られないように）。公式の目安は2,000語以下
+  return [...new Set([...getUserTerms(), ...DEFAULT_TERMS, ...HINT_TERMS])].slice(0, 600);
 }
 // ===== セッション情報（タイトル・概要）。話題を AI に伝えて、聞き取り誤りの推測を当てやすくする =====
 const SESSION_INFO_MAX = 1500;
@@ -1914,7 +1947,7 @@ const LLM_TIMEOUT_MS = 6000;   // これを超えたら機械翻訳で代替し�
 function buildSystemPrompt(srcCode, tgtCode) {
   const srcName = LANGS[cfg.srcLang]?.name || srcCode;
   const tgtName = LANGS[cfg.tgtLang]?.name || tgtCode;
-  const terms   = [...new Set([...DEFAULT_TERMS, ...getUserTerms()])].slice(0, 200);
+  const terms   = [...new Set([...getUserTerms(), ...DEFAULT_TERMS])].slice(0, 300);
   const session = getSessionInfo();
   const toneRule = (tgtCode === 'ja')
     ? (cfg.tone === 'plain' ? '・文体は「だ・である」調。' : '・文体は「です・ます」調の自然な話し言葉。')
