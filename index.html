@@ -1046,7 +1046,7 @@ const PRICE = {
 
 // Power Platform カンファレンス向けの既定用語（英語のまま残す・認識ヒントにも使う）
 // 画面で今どの版が動いているか確認するための版番号（更新のたびに上げる）
-const APP_VERSION = '2026-10-28.5';
+const APP_VERSION = '2026-10-29.1';
 { const v = document.getElementById('appVersion'); if (v) v.textContent = `版 ${APP_VERSION}`; }
 const DEFAULT_TERMS = [
   // --- Power Platform / Dynamics 365 ---
@@ -1983,6 +1983,9 @@ function buildSystemPrompt(srcCode, tgtCode) {
 // 改行は字幕では邪魔なのでつなげる（日本語同士は空白なし、英字同士は空白1つ）
 function cleanLlmText(t) {
   return String(t).trim()
+    // モデルの内部用の文字列が漏れることがある（例: "assistant to=final ..."）。そこから後ろを捨てる
+    .replace(/\s*(?:\bassistant\s*to=|<\|(?:im_|end|start|channel|message)|\bto=final\b)[\s\S]*$/i, '')
+    .replace(/天天中彩票\S*/g, '')
     .replace(/^"([^"]*)"$|^「([^「」]*)」$|^『([^『』]*)』$/, (m, a, b, c) => a ?? b ?? c)   // 全体を囲む引用符だけ外す
     .replace(/[【】]/g, '')                                   // モデルがまれに付ける記号のゴミ
     .replace(/[\u0900-\u0DFF\u0E00-\u0EFF\u0600-\u06FF]+/g, '') // まれに混ざる他言語の文字（ベンガル文字など）
