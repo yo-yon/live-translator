@@ -1,0 +1,5 @@
+live-translator.config.js
+api/node_modules/
+api/local.settings.json
+tools/node_modules/
+.DS_Store

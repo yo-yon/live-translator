@@ -1,0 +1,13 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "FUNCTIONS_WORKER_RUNTIME": "node",
+    "SPEECH_KEY": "<Speech（またはマルチサービス）のキー>",
+    "SPEECH_REGION": "eastus",
+    "FOUNDRY_ENDPOINT": "https://<リソース名>.openai.azure.com",
+    "FOUNDRY_API_KEY": "<Foundry のキー>",
+    "FOUNDRY_DEPLOYMENT": "gpt-5.4-mini",
+    "STORAGE_CONNECTION_STRING": "<ストレージの接続文字列>",
+    "FEEDBACK_HUB_URL": ""
+  }
+}

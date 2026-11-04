@@ -1,0 +1,13 @@
+{
+  "name": "live-translator-api",
+  "version": "0.1.0",
+  "private": true,
+  "main": "src/functions/*.js",
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "@azure/data-tables": "^13.3.2",
+    "@azure/functions": "^4.17.0"
+  }
+}
