@@ -1,0 +1,23 @@
+{
+  "routes": [
+    { "route": "/.auth/login/github", "statusCode": 404 },
+    { "route": "/.auth/login/x", "statusCode": 404 },
+    { "route": "/login", "redirect": "/.auth/login/aad" },
+    { "route": "/logout", "redirect": "/.auth/logout" },
+    { "route": "/unauthorized.html", "allowedRoles": ["anonymous"] },
+    { "route": "/live-translator.config.js", "statusCode": 404 },
+    { "route": "/api/*", "allowedRoles": ["owner", "member"] },
+    { "route": "/*", "allowedRoles": ["owner", "member"] }
+  ],
+  "responseOverrides": {
+    "401": { "statusCode": 302, "redirect": "/.auth/login/aad?post_login_redirect_uri=.referrer" },
+    "403": { "rewrite": "/unauthorized.html", "statusCode": 403 }
+  },
+  "globalHeaders": {
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "same-origin",
+    "Permissions-Policy": "microphone=(self), camera=(self), geolocation=()"
+  },
+  "mimeTypes": { ".json": "application/json" },
+  "platform": { "apiRuntime": "node:22" }
+}
