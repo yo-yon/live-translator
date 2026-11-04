@@ -694,10 +694,6 @@ body.mobile .field input, body.mobile .field select { font-size: 16px; } /* iOS 
     </div>
 
     <div class="section-title">③ 運用</div>
-    <label class="tts-toggle-label hosted-only" id="shareTranscriptRow" style="margin:0 0 4px;">
-      <input type="checkbox" id="shareTranscript"> 改善のため、終了時に字幕ログ（英文と訳）を作者にも送る
-    </label>
-    <div class="field-note hosted-only" id="shareTranscriptNote" style="margin:0 0 10px;">オンにした人の字幕ログだけが、ツールの改善（用語集・翻訳指示の見直し）に使われます。メールアドレス・URL・電話番号は送る前に伏せます。写真とメモは送りません。</div>
     <div class="field-row">
       <div class="field">
         <label>無音で待機（課金停止）</label>
@@ -1364,7 +1360,6 @@ function saveSettings() {
     next.speechRegion = HOSTED.speechRegion || next.speechRegion;
     if (HOSTED.deployment) next.aoaiDeployment = HOSTED.deployment;
     if (next.engine === 'llm' && !HOSTED.llm) { alert('このサーバーには Foundry のキーが設定されていません。「Speech 翻訳」を選んでください'); return; }
-    try { LS.setItem('lvShareTranscript', document.getElementById('shareTranscript')?.checked ? '1' : '0'); } catch (_) {}
   } else {
     if (!next.speechKey || !next.speechRegion) { alert('Speech キーとリージョンを入力してください'); return; }
     if (next.engine === 'llm' && (!next.aoaiEndpoint || !next.aoaiKey)) {
@@ -1474,9 +1469,6 @@ function applyHostedMode() {
   cfg.speechRegion = HOSTED.speechRegion || cfg.speechRegion;
   if (HOSTED.deployment) cfg.aoaiDeployment = HOSTED.deployment;
   if (!HOSTED.llm && cfg.engine === 'llm') cfg.engine = 'nmt';
-  const row = document.getElementById('shareTranscriptRow');
-  if (!HOSTED.share) { row.remove(); document.getElementById('shareTranscriptNote').remove(); }
-  try { document.getElementById('shareTranscript').checked = LS.getItem('lvShareTranscript') === '1'; } catch (_) {}
   // 起動時に「キー未入力」で開いた設定画面は閉じる
   if (settingsAutoOpened && isReady(cfg)) document.getElementById('settingsModal').style.display = 'none';
   if (isReady(cfg)) { updateLangRoute(); loadMicDevices(); }
@@ -1777,8 +1769,6 @@ async function startLiveInner(audioCtx) {
     stopLive(tokenErr.message);
     return true;   // 音声の後始末は stopLive が行う
   }
-  liveSessionKey = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
-  transcriptSent = false;
   connectSpeech();
   return true;
 }
@@ -2086,7 +2076,6 @@ function stopLive(reason) {
   setStatus(typeof reason === 'string' && reason ? reason : '停止しました');
   updateQueueBadge();
   renderCost();
-  sendTranscript();
 }
 
 // ===== LLM 翻訳（Foundry / Azure OpenAI v1 Chat Completions）=====
@@ -3178,34 +3167,6 @@ async function saveFeedback() {
     setStatus((isContent ? '👎 フィードバックを保存しました' : '💬 ご意見を保存しました') + to);
   } catch (e) {
     setStatus(`⚠ フィードバックを送れませんでした（${e.message}）。字幕ログには記録済みです`);
-  }
-}
-
-// ===== 字幕ログの送信（サーバー版で「送る」をオンにした人だけ・停止時に1回）=====
-let liveSessionKey = '', transcriptSent = false;
-async function sendTranscript() {
-  if (!HOSTED || transcriptSent || !liveSessionKey) return;
-  let on = false;
-  try { on = LS.getItem('lvShareTranscript') === '1'; } catch (_) {}
-  if (!on) return;
-  const since = liveStartedAt || 0;
-  const lines = histData.filter(r => r.kind === 'text' && (r.ts || 0) >= since)
-    .map(r => ({ t: r.time, src: r.original, ja: r.translated, engine: r.engine || '' }));
-  if (!lines.length) return;
-  transcriptSent = true;
-  const first = histData.find(r => r.kind === 'text' && (r.ts || 0) >= since);
-  try {
-    for (let i = 0, part = 0; i < lines.length; i += 100, part++) {
-      const r = await fetch('/api/transcript', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionId: liveSessionKey, part, date: first?.date || '', sessionTitle: sessionTitle(), version: APP_VERSION, lines: lines.slice(i, i + 100), share: !!HOSTED.share }),
-      });
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    }
-    setStatus(`停止しました。字幕ログ ${lines.length} 行を改善用に送りました`);
-  } catch (e) {
-    transcriptSent = false;
-    setStatus(`停止しました（字幕ログを送れませんでした：${e.message}）`);
   }
 }
 

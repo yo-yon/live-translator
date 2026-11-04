@@ -158,26 +158,6 @@ test("feedback：端末 ID は毎回同じ", async () => {
   assert.equal(ids[0], ids[1]);
 });
 
-test("transcript：保存は常に、中央への転送は share が true のときだけ", async () => {
-  calls.length = 0;
-  const body = { sessionId: "s1", part: 0, lines: [{ t: "10:00:00", src: "Hi", ja: "こんにちは" }] };
-  const a = await handlers.transcript(req({ method: "POST", body }), ctx);
-  assert.equal(a.status, 201);
-  assert.equal(a.jsonBody.forwarded, false);
-  assert.equal(calls.filter((c) => c.url.includes("/api/collect")).length, 0);
-  const long = Array.from({ length: 250 }, (_, i) => ({ t: "10:00:00", src: "a".repeat(900), ja: `${i}` }));
-  const b = await handlers.transcript(req({ method: "POST", body: { ...body, part: 1, lines: long, share: true } }), ctx);
-  assert.equal(b.jsonBody.forwarded, true);
-  // 受付の上限に合わせて 100 行ずつ・1行 400 字までに分けて送る
-  const sent = calls.filter((c) => c.url === "https://hub.example.net/api/collect/transcript").map((c) => JSON.parse(c.opt.body));
-  assert.deepEqual(sent.map((s) => s.transcript.lines.length), [100, 100, 50]);
-  assert.deepEqual(sent.map((s) => s.transcript.part), [10, 11, 12]);
-  assert.equal(sent[0].type, "transcript");
-  assert.equal(sent[0].transcript.lines[0].src.length, 400);
-  const keys = [...rows.keys()].filter((k) => k.startsWith("transcript-"));
-  assert.equal(keys.length, 2);
-});
-
 test("中央が未設定なら転送しない（保存は成功）", async () => {
   const url = process.env.FEEDBACK_HUB_URL;
   delete process.env.FEEDBACK_HUB_URL;

@@ -1,7 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const {
-  scrub, normalizeFeedback, normalizeTranscript, buildTranslateBody, normalizeEndpoint, requireUser,
+  scrub, normalizeFeedback, buildTranslateBody, normalizeEndpoint, requireUser,
 } = require("../src/lib");
 
 const principal = (roles) => ({
@@ -37,20 +37,6 @@ test("normalizeFeedback: コメント内の個人情報を伏せ、長さを制�
   const f = normalizeFeedback({ kind: "app", category: "other", comment: "a@b.co " + "x".repeat(2000) });
   assert.ok(f.comment.startsWith("[メール] "));
   assert.ok(f.comment.length <= 1000);
-});
-
-test("normalizeTranscript: 行を整形し、空行と不正な ID を除く", () => {
-  const t = normalizeTranscript({ sessionId: "abc/../1", part: 2, lines: [{ t: "10:00:01", src: "Hi", ja: "こんにちは" }, { src: "", ja: "" }] });
-  assert.equal(t.sessionId, "abc1");
-  assert.equal(t.part, 2);
-  assert.equal(t.lines.length, 1);
-  assert.equal(normalizeTranscript({ sessionId: "a", lines: [] }), null);
-  assert.equal(normalizeTranscript({ sessionId: "", lines: [{ src: "x" }] }), null);
-});
-
-test("normalizeTranscript: 1回300行まで", () => {
-  const lines = Array.from({ length: 400 }, (_, i) => ({ src: `s${i}`, ja: `j${i}` }));
-  assert.equal(normalizeTranscript({ sessionId: "s", lines }).lines.length, 300);
 });
 
 test("buildTranslateBody: モデルはサーバーの値を使い、余計な項目は捨てる", () => {

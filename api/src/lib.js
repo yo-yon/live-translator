@@ -73,29 +73,6 @@ function normalizeFeedback(b) {
   };
 }
 
-/** 字幕ログの1回分（分割送信の1チャンク）を検証して整形する。不正なら null */
-function normalizeTranscript(b) {
-  if (!b || typeof b !== "object") return null;
-  const sessionId = clip(b.sessionId, 40).replace(/[^A-Za-z0-9_-]/g, "");
-  if (!sessionId || !Array.isArray(b.lines) || !b.lines.length) return null;
-  const lines = b.lines.slice(0, 300).map((l) => ({
-    t: clip(l?.t, 8),
-    src: scrub(clip(l?.src, 1000)),
-    ja: scrub(clip(l?.ja, 1000)),
-    engine: clip(l?.engine, 20),
-  })).filter((l) => l.src || l.ja);
-  if (!lines.length) return null;
-  return {
-    sessionId,
-    part: Math.max(0, Math.min(999, parseInt(b.part, 10) || 0)),
-    date: clip(b.date, 10),
-    sessionTitle: scrub(clip(b.sessionTitle, 200)),
-    version: clip(b.version, 20),
-    lines,
-    at: new Date().toISOString(),
-  };
-}
-
 /**
  * 翻訳の依頼を検証する。ブラウザから来た値のうち、サーバーで使ってよいものだけを残す。
  * モデル（デプロイ名）はサーバー側の設定を使い、ブラウザの指定は無視する。
@@ -184,7 +161,6 @@ const HUB_URL = () => String(process.env.FEEDBACK_HUB_URL || "").trim().replace(
 const centralConfigured = () => /^https:\/\/[^\s]+$/i.test(HUB_URL());
 
 const FB_TEXT = { asr: "聞き取り違い", translation: "訳が不自然", other: "その他", feature: "機能の要望", usability: "使い勝手", bug: "不具合" };
-const TRANSCRIPT_CHUNK = 100; // 受付の上限（1回120行・192KB）に収まる行数
 
 /** 保存したフィードバック1件を、受付の形式（v1）にする */
 function hubFeedback(item, iid) {
@@ -205,23 +181,6 @@ function hubFeedback(item, iid) {
       context: { tab: item.context?.mode || "", device: item.context?.device || "" },
     },
   };
-}
-
-/** 保存した字幕ログ1回分を、受付の形式（v1）の配列にする（100行ずつ・1行400字まで） */
-function hubTranscripts(item, iid) {
-  const out = [];
-  for (let i = 0, k = 0; i < item.lines.length; i += TRANSCRIPT_CHUNK, k++) {
-    out.push({
-      v: 1, type: "transcript", app: APP_NAME, instanceId: iid, appVersion: item.version || "",
-      transcript: {
-        sessionId: item.sessionId,
-        part: item.part * 10 + k,
-        info: item.sessionTitle,
-        lines: item.lines.slice(i, i + TRANSCRIPT_CHUNK).map((l) => ({ t: l.t, src: clip(l.src, 400), ja: clip(l.ja, 400) })),
-      },
-    });
-  }
-  return out;
 }
 
 async function postJson(url, body, context) {
@@ -246,10 +205,8 @@ async function postJson(url, body, context) {
  */
 async function forwardToCentral(kind, item, iid, context) {
   if (!centralConfigured()) return false;
-  if (kind === "feedback") return postJson(HUB_URL(), hubFeedback(item, iid), context);
-  let ok = true;
-  for (const b of hubTranscripts(item, iid)) ok = (await postJson(`${HUB_URL()}/transcript`, b, context)) && ok;
-  return ok;
+  if (kind !== "feedback") return false; // 字幕ログ全体は送らない（社外秘や発言内容が混じるため）
+  return postJson(HUB_URL(), hubFeedback(item, iid), context);
 }
 
 const bad = (msg) => ({ status: 400, jsonBody: { error: msg } });
@@ -259,7 +216,7 @@ const fail = (context, e) => {
 };
 
 module.exports = {
-  APP_NAME, getPrincipal, requireUser, clip, scrub, normalizeFeedback, normalizeTranscript,
+  APP_NAME, getPrincipal, requireUser, clip, scrub, normalizeFeedback,
   buildTranslateBody, normalizeEndpoint, table, descKey, insertRow, listPartition, instanceId,
-  centralConfigured, forwardToCentral, hubFeedback, hubTranscripts, bad, fail,
+  centralConfigured, forwardToCentral, hubFeedback, bad, fail,
 };

@@ -1,6 +1,6 @@
 const { app } = require("@azure/functions");
 const {
-  requireUser, normalizeFeedback, normalizeTranscript, buildTranslateBody, normalizeEndpoint,
+  requireUser, normalizeFeedback, buildTranslateBody, normalizeEndpoint,
   descKey, insertRow, listPartition, instanceId, centralConfigured, forwardToCentral, bad, fail,
 } = require("../lib");
 
@@ -160,25 +160,3 @@ app.http("feedback", {
   },
 });
 
-/* ---------- 字幕ログ（利用者が「送る」をオンにしたときだけ届く） ---------- */
-app.http("transcript", {
-  route: "transcript",
-  methods: ["POST"],
-  authLevel: "anonymous",
-  handler: async (request, context) => {
-    const denied = requireUser(request);
-    if (denied) return denied;
-    try {
-      let raw;
-      try { raw = await request.json(); } catch { return bad("transcript"); }
-      const item = normalizeTranscript(raw);
-      if (!item) return bad("transcript");
-      const month = item.at.slice(0, 7).replace("-", "");
-      await insertRow(`transcript-${month}`, `${item.sessionId}-${String(item.part).padStart(3, "0")}`, item);
-      const forwarded = raw.share === true ? await forwardToCentral("transcript", item, await instanceId(), context) : false;
-      return { status: 201, jsonBody: { forwarded }, headers: noStore };
-    } catch (e) {
-      return fail(context, e);
-    }
-  },
-});
