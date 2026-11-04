@@ -8,7 +8,6 @@
     "FOUNDRY_API_KEY": "<Foundry のキー>",
     "FOUNDRY_DEPLOYMENT": "gpt-5.4-mini",
     "STORAGE_CONNECTION_STRING": "<ストレージの接続文字列>",
-    "CENTRAL_URL": "",
-    "CENTRAL_KEY": ""
+    "FEEDBACK_HUB_URL": ""
   }
 }

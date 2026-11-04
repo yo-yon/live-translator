@@ -695,7 +695,7 @@ body.mobile .field input, body.mobile .field select { font-size: 16px; } /* iOS 
 
     <div class="section-title">③ 運用</div>
     <label class="tts-toggle-label hosted-only" id="shareTranscriptRow" style="margin:0 0 4px;">
-      <input type="checkbox" id="shareTranscript"> 改善のため、終了時に字幕ログ（英文と訳）を送る
+      <input type="checkbox" id="shareTranscript"> 改善のため、終了時に字幕ログ（英文と訳）を作者にも送る
     </label>
     <div class="field-note hosted-only" id="shareTranscriptNote" style="margin:0 0 10px;">オンにした人の字幕ログだけが、ツールの改善（用語集・翻訳指示の見直し）に使われます。メールアドレス・URL・電話番号は送る前に伏せます。写真とメモは送りません。</div>
     <div class="field-row">
@@ -865,6 +865,7 @@ body.mobile .field input, body.mobile .field select { font-size: 16px; } /* iOS 
     </div>
     <input class="fb-correct" id="fbCorrect" placeholder="正しい語・訳（任意）例：agent skills">
     <textarea class="fb-comment" id="fbComment" placeholder="コメント（任意）"></textarea>
+    <label class="tts-toggle-label" id="fbShareRow" style="display:none;margin:4px 0 2px;"><input type="checkbox" id="fbShare"> 作者にも送る（ツールの改善に使います）</label>
     <div class="memo-tip" id="fbTip"></div>
     <div class="memo-actions">
       <button class="memo-del" id="fbClear" onclick="clearFeedback()" style="display:none">取り消す</button>
@@ -1094,7 +1095,7 @@ const PRICE = {
 
 // Power Platform カンファレンス向けの既定用語（英語のまま残す・認識ヒントにも使う）
 // 画面で今どの版が動いているか確認するための版番号（更新のたびに上げる）
-const APP_VERSION = '2026-11-04.1';
+const APP_VERSION = '2026-11-04.2';
 { const v = document.getElementById('appVersion'); if (v) v.textContent = `版 ${APP_VERSION}`; }
 const DEFAULT_TERMS = [
   // --- Power Platform / Dynamics 365 ---
@@ -3126,8 +3127,12 @@ function openFeedback(rec, kind) {
   document.getElementById('fbComment').value = prev?.comment || '';
   document.getElementById('fbComment').placeholder = isContent ? 'コメント（任意）' : 'ご意見・要望・不具合の内容（必須）';
   document.getElementById('fbClear').style.display = prev ? '' : 'none';
+  // 作者に届けるかは1件ごとに選ぶ（初期設定は送らない）
+  const canShare = !!(HOSTED && HOSTED.share);
+  document.getElementById('fbShareRow').style.display = canShare ? '' : 'none';
+  document.getElementById('fbShare').checked = false;
   document.getElementById('fbTip').textContent = HOSTED
-    ? (HOSTED.share ? '送った内容は、ツールの改善のために作者にも届きます（メールアドレス・URL・電話番号は伏せます）。' : 'この環境の記録として保存します。')
+    ? (canShare ? 'この環境に保存します。「作者にも送る」を選んだときだけ、作者にも届きます（メールアドレス・URL・電話番号は伏せます。名前やアカウントは送りません）。' : 'この環境の記録として保存します。')
     : 'この端末の字幕ログに記録します。CSV に「FB」の列として出力されます。';
   document.getElementById('fbOverlay').style.display = 'flex';
 }
@@ -3150,6 +3155,7 @@ async function saveFeedback() {
   const category = (document.querySelector(isContent ? 'input[name="fbCat"]:checked' : 'input[name="fbAppCat"]:checked') || {}).value;
   if (!isContent && !comment) { document.getElementById('fbComment').focus(); return; }
   const correct = isContent ? document.getElementById('fbCorrect').value.trim() : '';
+  const share = !!(HOSTED && HOSTED.share && document.getElementById('fbShare').checked);
   const rec = fbTarget;
   if (rec) {
     rec.fb = { category, correct, comment, at: Date.now() };
@@ -3161,13 +3167,15 @@ async function saveFeedback() {
   const body = {
     kind: fbKind, category, comment, correct,
     original: rec?.original || '', translated: rec?.translated || '', engine: rec?.engine || '',
-    sessionTitle: sessionTitle(),
+    sessionTitle: sessionTitle(), share,
     context: { version: APP_VERSION, device: deviceLabel(), mode: cfg.engine },
   };
   try {
     const r = await fetch('/api/feedback', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    setStatus(isContent ? '👎 フィードバックを送りました。ありがとうございます' : '💬 ご意見を送りました。ありがとうございます');
+    const j = await r.json().catch(() => ({}));
+    const to = share ? (j.forwarded ? '（作者にも送りました）' : '（作者には送れませんでした。この環境には保存済みです）') : '';
+    setStatus((isContent ? '👎 フィードバックを保存しました' : '💬 ご意見を保存しました') + to);
   } catch (e) {
     setStatus(`⚠ フィードバックを送れませんでした（${e.message}）。字幕ログには記録済みです`);
   }
@@ -3187,10 +3195,10 @@ async function sendTranscript() {
   transcriptSent = true;
   const first = histData.find(r => r.kind === 'text' && (r.ts || 0) >= since);
   try {
-    for (let i = 0, part = 0; i < lines.length; i += 300, part++) {
+    for (let i = 0, part = 0; i < lines.length; i += 100, part++) {
       const r = await fetch('/api/transcript', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionId: liveSessionKey, part, date: first?.date || '', sessionTitle: sessionTitle(), version: APP_VERSION, lines: lines.slice(i, i + 300), share: !!HOSTED.share }),
+        body: JSON.stringify({ sessionId: liveSessionKey, part, date: first?.date || '', sessionTitle: sessionTitle(), version: APP_VERSION, lines: lines.slice(i, i + 100), share: !!HOSTED.share }),
       });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
     }

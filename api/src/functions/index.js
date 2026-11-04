@@ -149,10 +149,10 @@ app.http("feedback", {
       try { raw = await request.json(); } catch { return bad("feedback"); }
       const item = normalizeFeedback(raw);
       if (!item) return bad("feedback");
-      const iid = await instanceId();
+      // 作者に届けるのは、利用者が1件ごとに「作者にも送る」を選んだものだけ（初期設定は送らない）
+      item.shared = raw.share === true && centralConfigured();
       await insertRow("feedback", descKey(), item);
-      // 👎・ご意見は、中央の受け口が設定されていれば常に転送（設定は環境の持ち主が決める）
-      const forwarded = await forwardToCentral("feedback", item, iid, context);
+      const forwarded = item.shared ? await forwardToCentral("feedback", item, await instanceId(), context) : false;
       return { status: 201, jsonBody: { forwarded }, headers: noStore };
     } catch (e) {
       return fail(context, e);
@@ -173,10 +173,9 @@ app.http("transcript", {
       try { raw = await request.json(); } catch { return bad("transcript"); }
       const item = normalizeTranscript(raw);
       if (!item) return bad("transcript");
-      const iid = await instanceId();
       const month = item.at.slice(0, 7).replace("-", "");
       await insertRow(`transcript-${month}`, `${item.sessionId}-${String(item.part).padStart(3, "0")}`, item);
-      const forwarded = raw.share === true ? await forwardToCentral("transcript", item, iid, context) : false;
+      const forwarded = raw.share === true ? await forwardToCentral("transcript", item, await instanceId(), context) : false;
       return { status: 201, jsonBody: { forwarded }, headers: noStore };
     } catch (e) {
       return fail(context, e);

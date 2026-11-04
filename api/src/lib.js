@@ -178,32 +178,78 @@ async function instanceId() {
 
 /* ---------- 中央の受け口への転送 ---------- */
 
-const centralConfigured = () => !!(process.env.CENTRAL_URL && process.env.CENTRAL_KEY);
+// 送り先は環境変数 FEEDBACK_HUB_URL（作者の受付 feedback-hub の https://<受付>/api/collect）。
+// 空なら機能ごと無効。English Trainer と同じ送信形式（v1）で送る
+const HUB_URL = () => String(process.env.FEEDBACK_HUB_URL || "").trim().replace(/\/+$/, "");
+const centralConfigured = () => /^https:\/\/[^\s]+$/i.test(HUB_URL());
 
-/**
- * 中央の受け口に送る（サーバー間）。失敗しても利用者側の保存は成功扱いにする。
- * @returns {Promise<boolean>} 送れたか
- */
-async function forwardToCentral(kind, payload, iid, context) {
-  if (!centralConfigured()) return false;
-  const url = `${process.env.CENTRAL_URL.replace(/\/+$/, "")}/api/ingest`;
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 4000);
-  try {
-    const r = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "x-hub-key": process.env.CENTRAL_KEY },
-      body: JSON.stringify({ app: APP_NAME, kind, instanceId: iid, payload }),
-      signal: ctrl.signal,
+const FB_TEXT = { asr: "聞き取り違い", translation: "訳が不自然", other: "その他", feature: "機能の要望", usability: "使い勝手", bug: "不具合" };
+const TRANSCRIPT_CHUNK = 100; // 受付の上限（1回120行・192KB）に収まる行数
+
+/** 保存したフィードバック1件を、受付の形式（v1）にする */
+function hubFeedback(item, iid) {
+  const content = item.kind === "content";
+  return {
+    v: 1, type: "feedback", app: APP_NAME, instanceId: iid, appVersion: item.context?.version || "",
+    item: {
+      kind: content ? "content" : "app",
+      category: FB_TEXT[item.category] || "その他",
+      targetType: content ? (item.category === "translation" ? "translation" : "caption") : "",
+      // 同じ語への指摘を、別々の人からのものとして集計できるようにする（正しい語があればそれ）
+      targetId: content ? clip(String(item.correct || item.original || "").toLowerCase().replace(/\s+/g, " ").trim(), 100) : "",
+      targetText: content ? (item.original || item.translated) : "",
+      comment: item.comment,
+      detail: content
+        ? { variant: "live", engine: item.engine, source: item.original, translated: item.translated, expected: item.correct }
+        : { variant: "live" },
+      context: { tab: item.context?.mode || "", device: item.context?.device || "" },
+    },
+  };
+}
+
+/** 保存した字幕ログ1回分を、受付の形式（v1）の配列にする（100行ずつ・1行400字まで） */
+function hubTranscripts(item, iid) {
+  const out = [];
+  for (let i = 0, k = 0; i < item.lines.length; i += TRANSCRIPT_CHUNK, k++) {
+    out.push({
+      v: 1, type: "transcript", app: APP_NAME, instanceId: iid, appVersion: item.version || "",
+      transcript: {
+        sessionId: item.sessionId,
+        part: item.part * 10 + k,
+        info: item.sessionTitle,
+        lines: item.lines.slice(i, i + TRANSCRIPT_CHUNK).map((l) => ({ t: l.t, src: clip(l.src, 400), ja: clip(l.ja, 400) })),
+      },
     });
-    if (!r.ok) context?.warn?.(`central ingest failed: ${r.status}`);
+  }
+  return out;
+}
+
+async function postJson(url, body, context) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 5000);
+  try {
+    const r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal: ctrl.signal });
+    if (!r.ok) context?.warn?.(`feedback hub failed: ${r.status}`);
     return r.ok;
   } catch (e) {
-    context?.warn?.(`central ingest error: ${e.message}`);
+    context?.warn?.(`feedback hub error: ${e.message}`);
     return false;
   } finally {
     clearTimeout(timer);
   }
+}
+
+/**
+ * 作者の受付に送る（サーバー間）。利用者が「作者にも送る」を選んだものだけ呼ぶ。
+ * 失敗しても利用者側の保存は成功扱いにする。
+ * @returns {Promise<boolean>} 送れたか
+ */
+async function forwardToCentral(kind, item, iid, context) {
+  if (!centralConfigured()) return false;
+  if (kind === "feedback") return postJson(HUB_URL(), hubFeedback(item, iid), context);
+  let ok = true;
+  for (const b of hubTranscripts(item, iid)) ok = (await postJson(`${HUB_URL()}/transcript`, b, context)) && ok;
+  return ok;
 }
 
 const bad = (msg) => ({ status: 400, jsonBody: { error: msg } });
@@ -215,5 +261,5 @@ const fail = (context, e) => {
 module.exports = {
   APP_NAME, getPrincipal, requireUser, clip, scrub, normalizeFeedback, normalizeTranscript,
   buildTranslateBody, normalizeEndpoint, table, descKey, insertRow, listPartition, instanceId,
-  centralConfigured, forwardToCentral, bad, fail,
+  centralConfigured, forwardToCentral, hubFeedback, hubTranscripts, bad, fail,
 };
