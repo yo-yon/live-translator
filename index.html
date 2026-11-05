@@ -542,6 +542,7 @@ header {
 /* サーバー版／キー入力版の切り替え */
 .hosted-only { display: none !important; }
 body.hosted .hosted-only { display: revert !important; }
+body.pages-share .hosted-only.fb-app-btn { display: revert !important; } /* GitHub Pages 版でも、作者に送れるときは「ご意見」を出す */
 body.hosted .byok-only { display: none !important; }
 body.mobile .fb-app-lbl { display: none; }
 /* 字幕ログの 👎 */
@@ -904,7 +905,7 @@ body.mobile .field input, body.mobile .field select { font-size: 16px; } /* iOS 
       color:#818cf8; white-space:nowrap;
     ">標準</div>
     <button class="btn-settings-sm ui-mode-btn" id="uiModeBtn" onclick="toggleUiMode()" title="PC版 / iPhone版 を切り替え">🖥 PC版</button>
-    <button class="btn-settings-sm hosted-only" onclick="openFeedback(null, 'app')" title="ツールへのご意見・要望・不具合">💬<span class="fb-app-lbl"> ご意見</span></button>
+    <button class="btn-settings-sm hosted-only fb-app-btn" onclick="openFeedback(null, 'app')" title="ツールへのご意見・要望・不具合">💬<span class="fb-app-lbl"> ご意見</span></button>
     <button class="btn-settings-sm" onclick="openSettings()">⚙ 設定</button>
   </div>
 </header>
@@ -1043,6 +1044,14 @@ function safeStorage(kind) {
 const SS = safeStorage('sessionStorage');
 const LS = safeStorage('localStorage');
 
+// ===== 作者の受付（GitHub Pages 版からブラウザで直接送る）=====
+// 作者が公開している GitHub Pages（下の PAGES_HUB_ORIGINS）で動いているときだけ使う。
+// サーバー版は自分の API からサーバー間で送るので、ここは使わない。フォークして別の場所で動かした場合も使わない（受付も受け付けない）。
+const PAGES_HUB_URL = 'https://black-wave-0080aa600.4.azurestaticapps.net/api/collect';
+const PAGES_HUB_ORIGINS = ['https://yo-yon.github.io'];
+const PAGES_SHARE = PAGES_HUB_ORIGINS.includes(location.origin);
+if (PAGES_SHARE) document.body.classList.add('pages-share');
+
 // ===== 言語設定 =====
 const LANGS = {
   'ja-JP': { name: '日本語',   voice: 'ja-JP-NanamiNeural',    tc: 'ja'      },
@@ -1091,7 +1100,7 @@ const PRICE = {
 
 // Power Platform カンファレンス向けの既定用語（英語のまま残す・認識ヒントにも使う）
 // 画面で今どの版が動いているか確認するための版番号（更新のたびに上げる）
-const APP_VERSION = '2026-11-04.2';
+const APP_VERSION = '2026-11-05.1';
 { const v = document.getElementById('appVersion'); if (v) v.textContent = `版 ${APP_VERSION}`; }
 const DEFAULT_TERMS = [
   // --- Power Platform / Dynamics 365 ---
@@ -3097,8 +3106,61 @@ let fbTarget = null, fbKind = 'content';
 function deviceLabel() { return document.body.classList.contains('mobile') ? 'mobile' : 'pc'; }
 function sessionTitle() { return (getSessionInfo().split('\n')[0] || '').slice(0, 200); }
 
+// 送る前に伏せる（受付でも同じ処理をする）。古い iPhone の Safari でも動くように、後読み（?<!）は使わない
+function scrubForHub(text, max) {
+  return String(text ?? '')
+    .replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, '[メール]')
+    .replace(/\b(?:https?:\/\/|www\.)[A-Za-z0-9\-._~:\/?#\[\]@!$&'()*+,;=%]+/gi, '[URL]')
+    .replace(/(^|[^\d])((?:\+?\d{1,3}[-.\s]?)?(?:\(\d{2,4}\)[-.\s]?|\d{2,4}[-.])\d{2,4}[-.]\d{3,4})(?!\d)/g, (m, p) => `${p}[番号]`)
+    .replace(/(^|[^\d,.])\d{10,}(?![\d,.])/g, (m, p) => `${p}[番号]`)
+    .slice(0, max);
+}
+// この端末のランダムな ID（作者が同じ人からの指摘をまとめるため。名前やキーとは結び付かない）
+function hubInstanceId() {
+  let id = LS.getItem('lvHubId');
+  if (!/^[A-Za-z0-9-]{8,64}$/.test(id || '')) {
+    id = (crypto.randomUUID ? crypto.randomUUID() : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`);
+    LS.setItem('lvHubId', id);
+  }
+  return id;
+}
+const HUB_CATEGORY = { asr: '聞き取り違い', translation: '訳が不自然', other: 'その他', feature: '機能の要望', usability: '使い勝手', bug: '不具合' };
+/** 受付の形式（v1）。サーバー版の api/src/lib.js の hubFeedback と同じ形にする */
+function hubPayload(kind, category, comment, correct, rec) {
+  const content = kind === 'content';
+  return {
+    v: 1, type: 'feedback', app: 'live-translator', instanceId: hubInstanceId(), appVersion: APP_VERSION,
+    item: {
+      kind: content ? 'content' : 'app',
+      category: HUB_CATEGORY[category] || 'その他',
+      targetType: content ? (category === 'translation' ? 'translation' : 'caption') : '',
+      targetId: content ? scrubForHub(String(correct || rec?.original || '').toLowerCase().replace(/\s+/g, ' ').trim(), 100) : '',
+      targetText: content ? scrubForHub(rec?.original || rec?.translated || '', 300) : '',
+      comment: scrubForHub(comment, 500),
+      detail: content
+        ? { variant: 'pages', engine: rec?.engine || '', source: scrubForHub(rec?.original, 500), translated: scrubForHub(rec?.translated, 500), expected: scrubForHub(correct, 500) }
+        : { variant: 'pages' },
+      context: { tab: cfg.engine || '', device: deviceLabel() },
+    },
+  };
+}
+/** 作者の受付に送る。@returns 'sent' | 'limited' | 'failed' */
+async function sendToHub(payload) {
+  try {
+    // text/plain で送ると、ブラウザの事前確認（プリフライト）が起きない。本文は JSON
+    const r = await fetch(PAGES_HUB_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=UTF-8' }, body: JSON.stringify(payload) });
+    if (r.status === 202 || r.ok) return 'sent';
+    if (r.status === 429) return 'limited';
+    console.warn('feedback hub', r.status);
+    return 'failed';
+  } catch (e) {
+    console.warn('feedback hub', e.message);
+    return 'failed';
+  }
+}
+
 function openFeedback(rec, kind) {
-  if (kind === 'app' && !HOSTED) return;
+  if (kind === 'app' && !HOSTED && !PAGES_SHARE) return;
   fbTarget = rec || null;
   fbKind = kind;
   const isContent = kind === 'content';
@@ -3118,11 +3180,17 @@ function openFeedback(rec, kind) {
   document.getElementById('fbClear').style.display = prev ? '' : 'none';
   // 作者に届けるかは1件ごとに選ぶ（初期設定は送らない）
   const canShare = !!(HOSTED && HOSTED.share);
-  document.getElementById('fbShareRow').style.display = canShare ? '' : 'none';
+  const pages = !HOSTED && PAGES_SHARE;
+  document.getElementById('fbShareRow').style.display = (canShare || (pages && isContent)) ? '' : 'none';
   document.getElementById('fbShare').checked = false;
+  const idNote = pages ? `端末ID：${hubInstanceId().slice(0, 8)}（削除を頼むときに使います）` : '';
   document.getElementById('fbTip').textContent = HOSTED
     ? (canShare ? 'この環境に保存します。「作者にも送る」を選んだときだけ、作者にも届きます（メールアドレス・URL・電話番号は伏せます。名前やアカウントは送りません）。' : 'この環境の記録として保存します。')
-    : 'この端末の字幕ログに記録します。CSV に「FB」の列として出力されます。';
+    : pages
+      ? (isContent
+        ? `この端末の字幕ログに記録します（CSV に「FB」の列として出力）。「作者にも送る」を選んだときだけ、この行の原文と訳を添えて作者にも届きます。メールアドレス・URL・電話番号は伏せ、名前やキーは送りません。${idNote}`
+        : `作者に届きます（この端末には残りません）。メールアドレス・URL・電話番号は伏せ、名前やキーは送りません。${idNote}`)
+      : 'この端末の字幕ログに記録します。CSV に「FB」の列として出力されます。';
   document.getElementById('fbOverlay').style.display = 'flex';
 }
 function closeFeedback() {
@@ -3146,13 +3214,36 @@ async function saveFeedback() {
   const correct = isContent ? document.getElementById('fbCorrect').value.trim() : '';
   const share = !!(HOSTED && HOSTED.share && document.getElementById('fbShare').checked);
   const rec = fbTarget;
+  // GitHub Pages 版のご意見：この端末には残さず、作者にだけ送る。送れなかったら画面を閉じずに書いた内容を残す
+  if (!HOSTED && !isContent) {
+    if (!PAGES_SHARE) return;
+    const btn = document.querySelector('#fbOverlay .memo-save');
+    btn.disabled = true;
+    const res = await sendToHub(hubPayload('app', category, comment, '', null));
+    btn.disabled = false;
+    if (res !== 'sent') {
+      setStatus(res === 'limited' ? '⚠ 今日送れる回数を超えました。明日もう一度送ってください' : '⚠ ご意見を送れませんでした。通信を確認して、もう一度「送る」を押してください');
+      return;
+    }
+    closeFeedback();
+    setStatus('💬 ご意見を作者に送りました。ありがとうございます');
+    return;
+  }
+  const pagesShare = !HOSTED && PAGES_SHARE && isContent && document.getElementById('fbShare').checked;
   if (rec) {
     rec.fb = { category, correct, comment, at: Date.now() };
     TL.put(rec);
     markFeedback(rec);
   }
   closeFeedback();
-  if (!HOSTED) { setStatus('👎 字幕ログに記録しました（CSV に出力されます）'); return; }
+  if (!HOSTED) {
+    if (!pagesShare) { setStatus('👎 字幕ログに記録しました（CSV に出力されます）'); return; }
+    const res = await sendToHub(hubPayload('content', category, comment, correct, rec));
+    setStatus(res === 'sent' ? '👎 字幕ログに記録し、作者にも送りました'
+      : res === 'limited' ? '👎 字幕ログに記録しました（今日送れる回数を超えたため、作者には送っていません）'
+      : '👎 字幕ログに記録しました（作者には送れませんでした）');
+    return;
+  }
   const body = {
     kind: fbKind, category, comment, correct,
     original: rec?.original || '', translated: rec?.translated || '', engine: rec?.engine || '',
