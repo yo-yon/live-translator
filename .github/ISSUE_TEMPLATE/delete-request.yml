@@ -1,0 +1,31 @@
+name: 送ったフィードバックの削除依頼
+description: 作者に送ったフィードバック（👎・ご意見）を消してほしいとき
+title: "フィードバックの削除依頼"
+body:
+  - type: markdown
+    attributes:
+      value: |
+        作者に送ったフィードバックを、作者の受付から削除します。
+        **この Issue は誰でも見られます。** 端末ID の先頭8文字だけを書き、字幕の内容・コメントの本文・名前・メールアドレスは書かないでください。
+  - type: input
+    id: instance
+    attributes:
+      label: 端末ID（先頭8文字）
+      description: GitHub Pages 版では、👎・ご意見の画面の下に「端末ID：xxxxxxxx」と表示されています（例：3f2a9c1e）。サーバー版で送った場合は「サーバー版」と書き、下の日付を必ず書いてください
+      placeholder: "3f2a9c1e"
+    validations:
+      required: true
+  - type: dropdown
+    id: scope
+    attributes:
+      label: 削除する範囲
+      options:
+        - この端末ID から送ったものすべて
+        - 一部（おおよその日付を下に書く）
+    validations:
+      required: true
+  - type: input
+    id: when
+    attributes:
+      label: おおよその日付（一部のときだけ）
+      placeholder: "2026年11月上旬"
