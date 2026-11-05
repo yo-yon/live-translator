@@ -6,7 +6,7 @@
 
 ## ほかの人に使ってもらうとき
 
-ツールは URL（https://yo-yon.github.io/live-translator/）を共有するだけで使えます。ツール本体にキーは入っていないので、URL を知られてもキーは漏れません。ただし、使うには Azure のキーが必要で、用意のしかたは次の3通りです。
+ツールは URL（[https://yo-yon.github.io/live-translator/](https://yo-yon.github.io/live-translator/)）を共有するだけで使えます。ツール本体にキーは入っていないので、URL を知られてもキーは漏れません。ただし、使うには Azure のキーが必要で、用意のしかたは次の3通りです。
 
 | 方法 | 手間 | 費用の支払い | 注意点 |
 | --- | --- | --- | --- |
