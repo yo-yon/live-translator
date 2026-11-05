@@ -7,6 +7,9 @@
         │   字幕ログ全体は送らない（社外秘や発言内容が混じるため）
         │ メール・URL・電話番号は伏せる。名前・アカウントは送らない
         ▼
+GitHub Pages 版（https://yo-yon.github.io）─👎（「作者にも送る」を選んだ1件）・ご意見─▶ ブラウザから直接
+        │ 受付は、このサイトからの送信だけを受け付ける（ブラウザからの送信は1日300件まで）
+        ▼
 作者の受付 feedback-hub（English Trainer と共通。作者の Azure・非公開リポジトリ）
         │ ① 毎週日曜 21:23（日本時間）GitHub Actions「Weekly hub report」が集計 → reports ブランチ
         ▼
