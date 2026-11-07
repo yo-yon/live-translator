@@ -4,6 +4,21 @@
 
 英語の講演をマイクで拾い、Azure の音声認識と LLM で自然な日本語字幕にするブラウザツールです。使う人ごとに Azure のキーが必要で、ツール本体は URL を開くだけで使えます。
 
+## ツールを開く
+
+| 使い方 | URL |
+| --- | --- |
+| **ライブ版**（講演を聞いて字幕にする） | **https://yo-yon.github.io/live-translator/** |
+| 対話版（対面で2人が交互に話す） | https://yo-yon.github.io/live-translator/conversation.html |
+
+はじめて使うとき：
+
+1. この後の「[Azure の準備](#azure-の準備)」で、自分の Azure に Foundry リソースを作り、翻訳用のモデルをデプロイする（30分ほど）
+2. 上の URL を開き、設定画面にキーとエンドポイントを入れて **保存して開始** を押す
+3. **▶ 開始** を押し、マイクの使用を許可する
+
+PC は Chrome か Edge、iPhone は Safari で開きます。インストールは不要です。詳しくは「使い方：PC 版」「使い方：iPhone 版」を見てください。
+
 ## ほかの人に使ってもらうとき
 
 ツールは URL（[https://yo-yon.github.io/live-translator/](https://yo-yon.github.io/live-translator/)）を共有するだけで使えます。ツール本体にキーは入っていないので、URL を知られてもキーは漏れません。ただし、使うには Azure のキーが必要で、用意のしかたは次の3通りです。
