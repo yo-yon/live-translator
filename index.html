@@ -539,6 +539,10 @@ header {
 .memo-actions .memo-save { background: #fbbf24; color: #111; border-color: #fbbf24; font-weight: 700; }
 .memo-actions .memo-del { margin-right: auto; color: #fca5a5; border-color: rgba(248,113,113,0.4); }
 .memo-tip { font-size: 11px; color: #4a5568; margin-top: 6px; }
+/* PC版のメモは画面を覆わない（字幕を見ながら書け、上のボタンも押せる） */
+body:not(.mobile) #memoOverlay { background: transparent; pointer-events: none; justify-content: flex-end; padding: 0 16px 16px; }
+body:not(.mobile) #memoOverlay .memo-sheet { pointer-events: auto; max-width: 440px; border-radius: 16px; box-shadow: 0 12px 40px rgba(0,0,0,0.55); }
+.memo-actions .memo-shot:disabled { opacity: 0.4; cursor: not-allowed; }
 /* サーバー版／キー入力版の切り替え */
 .hosted-only { display: none !important; }
 body.hosted .hosted-only { display: revert !important; }
@@ -879,6 +883,7 @@ body.mobile .field input, body.mobile .field select { font-size: 16px; } /* iOS 
     <div class="memo-tip">押した時刻の位置に入ります。翻訳は止まりません。iPhone はキーボードの音声入力を使うとマイクが取られるので、手入力してください。</div>
     <div class="memo-actions">
       <button class="memo-del" id="memoDel" onclick="deleteMemo()" style="display:none">削除</button>
+      <button class="memo-shot" id="memoShot" onclick="memoShot()" style="display:none" title="メモを書いたまま、画面共有中のスライドを撮影（Alt+S）">📸 スクショ</button>
       <button onclick="closeMemo()">キャンセル</button>
       <button class="memo-save" onclick="saveMemo()">保存</button>
     </div>
@@ -897,7 +902,7 @@ body.mobile .field input, body.mobile .field select { font-size: 16px; } /* iOS 
   <div class="header-right">
     <div class="lang-route" id="langRoute">EN → JA</div>
     <div class="queue-badge" id="queueBadge">⏳ <span id="queueNum">0</span> 待機</div>
-    <div class="cost-badge" id="costBadge" title="概算費用（今回 / 累計）。累計はこのブラウザに保存。クリックでリセット" onclick="resetCostTotal()" style="cursor:pointer">💴 ¥0 / 累計 ¥0</div>
+    <div class="cost-badge" id="costBadge" title="費用の目安（今回 / 累計）。実際の請求額ではありません。単価・為替は固定の仮の値で、無料枠や税は反映していません。正確な金額は Azure の「コストの管理」で確認してください。累計はこのブラウザに保存。停止中にクリックでリセット" onclick="resetCostTotal()" style="cursor:pointer">💴 概算 約¥0 / 累計 約¥0</div>
     <div id="modeBadge" style="
       font-family:'JetBrains Mono',monospace; font-size:10px;
       padding:3px 8px; border-radius:4px;
@@ -1015,7 +1020,7 @@ body.mobile .field input, body.mobile .field select { font-size: 16px; } /* iOS 
     <div style="display:flex;gap:6px">
       <button class="btn-clear-hist" onclick="downloadReport()" title="字幕と写真を時系列に並べた HTML を保存">レポート出力</button>
       <button class="btn-clear-hist" onclick="downloadCSV()">CSV出力</button>
-      <button class="btn-clear-hist" onclick="clearHistory()">クリア</button>
+      <button class="btn-clear-hist" onclick="clearHistory()" title="字幕ログと、画面中央の字幕を消去">クリア</button>
     </div>
   </div>
   <div class="history-body" id="histBody">
@@ -1100,7 +1105,7 @@ const PRICE = {
 
 // Power Platform カンファレンス向けの既定用語（英語のまま残す・認識ヒントにも使う）
 // 画面で今どの版が動いているか確認するための版番号（更新のたびに上げる）
-const APP_VERSION = '2026-11-05.1';
+const APP_VERSION = '2026-11-20.1';
 { const v = document.getElementById('appVersion'); if (v) v.textContent = `版 ${APP_VERSION}`; }
 const DEFAULT_TERMS = [
   // --- Power Platform / Dynamics 365 ---
@@ -1135,6 +1140,8 @@ const DEFAULT_TERMS = [
   'Azure Virtual Desktop', 'Azure DevOps', 'Bicep', 'Microsoft Agent Framework', 'Semantic Kernel',
   'Model Context Protocol', 'MCP', 'Azure MCP Server', 'GitHub', 'GitHub Copilot', 'GitHub Actions',
   'Visual Studio Code', 'VS Code',
+  // --- AI モデル名（小数点・ハイフンを落とさない）---
+  'GPT-5.5', 'GPT-5.4', 'GPT-5.4 mini', 'GPT-5.4 nano', 'GPT-5.2', 'GPT-5.1', 'GPT-5', 'GPT-5 mini', 'GPT-5 nano', 'GPT-4.1', 'GPT-4.1 mini', 'GPT-4.1 nano', 'GPT-4o', 'GPT-4o mini', 'GPT-4', 'GPT-3.5', 'GPT-3.5 Turbo', 'o1', 'o3', 'o3-mini', 'o4-mini', 'gpt-oss', 'Sora', 'model router', 'Claude', 'Gemini', 'Llama', 'Phi', 'Mistral', 'DeepSeek', 'Grok',
 ];
 // 音声認識のヒント専用（訳では日本語にしてよい一般語）。会期中によく出る語
 const HINT_TERMS = [
@@ -1152,7 +1159,7 @@ const HINT_TERMS = [
   'tokens', 'inference', 'hallucination', 'responsible AI', 'telemetry', 'inventory', 'lifecycle',
 ];
 // 聞き間違いの例（翻訳指示に入る）。上の2つと合わせて、terms.json があればそちらで置き換える
-const ASR_FIXES = [{"heard": ["Indian skills", "engine skills"], "correct": "agent skills"}, {"heard": ["skin", "scale", "spill"], "correct": "skill"}, {"heard": ["pilot studio", "Copilot who"], "correct": "Copilot Studio"}, {"heard": ["MCTS"], "correct": "MCPs"}, {"heard": ["admiral", "athletes"], "correct": "admins"}, {"heard": ["plugging"], "correct": "plugin"}, {"heard": ["patient(s)"], "correct": "agent(s)"}, {"heard": ["XP server", "CP server"], "correct": "MCP server"}, {"heard": ["Papa Form", "Pop platform"], "correct": "Power Platform"}, {"heard": ["Power Cat", "Power cut", "Power CAD"], "correct": "Power CAT"}, {"heard": ["kids", "heat", "dose"], "correct": "Git"}, {"heard": ["alien", "A and N"], "correct": "ALM"}, {"heard": ["PPAC", "P back"], "correct": "Power Platform admin center"}];
+const ASR_FIXES = [{"heard": ["GPT 35", "GPT three point five", "GPT 3 5"], "correct": "GPT-3.5"}, {"heard": ["GPT 40", "GPT 4.0", "GPT four oh"], "correct": "GPT-4o"}, {"heard": ["GPT 41", "GPT four point one"], "correct": "GPT-4.1"}, {"heard": ["GPT 54", "GPT five point four"], "correct": "GPT-5.4"}, {"heard": ["Indian skills", "engine skills"], "correct": "agent skills"}, {"heard": ["skin", "scale", "spill"], "correct": "skill"}, {"heard": ["pilot studio", "Copilot who"], "correct": "Copilot Studio"}, {"heard": ["MCTS"], "correct": "MCPs"}, {"heard": ["admiral", "athletes"], "correct": "admins"}, {"heard": ["plugging"], "correct": "plugin"}, {"heard": ["patient(s)"], "correct": "agent(s)"}, {"heard": ["XP server", "CP server"], "correct": "MCP server"}, {"heard": ["Papa Form", "Pop platform"], "correct": "Power Platform"}, {"heard": ["Power Cat", "Power cut", "Power CAD"], "correct": "Power CAT"}, {"heard": ["kids", "heat", "dose"], "correct": "Git"}, {"heard": ["alien", "A and N"], "correct": "ALM"}, {"heard": ["PPAC", "P back"], "correct": "Power Platform admin center"}];
 let termsVersion = 'built-in';
 function applyTerms(j) {
   if (!j || typeof j !== 'object') return false;
@@ -2107,6 +2114,7 @@ function buildSystemPrompt(srcCode, tgtCode) {
     toneRule,
     `・字幕なので簡潔に。言いよどみ（um, uh, you know, like など）や同じ語の繰り返しは省く。`,
     `・英語のまま残すのは、製品名・サービス名と人名・社名だけ。次の語は訳さない: ${terms.join(', ')}`,
+    `・AI モデル名とバージョン番号は小数点・ハイフン・英字を落とさず、聴講者が知る表記で書く（GPT-3.5、GPT-4.1、GPT-4o、GPT-5.4 mini、o4-mini）。Azure のデプロイ名の書き方（gpt-35-turbo など）にしない。「GPT 35」「GPT three point five」は GPT-3.5、「GPT four oh」「GPT 40」は GPT-4o と推測する。`,
     `・それ以外の一般語は日本語にする（agent→エージェント、skill→スキル、plugin→プラグイン、license→ライセンス、website→Webサイト、document→ドキュメント、user→ユーザー、admin→管理者、maker→作成者）。`,
     ``,
     `# 音声認識の誤りへの対処`,
@@ -2275,7 +2283,7 @@ function renderCost() {
   const total = isLive ? costTotalAtStart + now : costTotalYen;
   const el = document.getElementById('costBadge');
   if (!el) return;
-  el.textContent = `💴 ¥${Math.round(now).toLocaleString()} / 累計 ¥${Math.round(total).toLocaleString()}`;
+  el.textContent = `💴 概算 約¥${Math.round(now).toLocaleString()} / 累計 約¥${Math.round(total).toLocaleString()}`;
   el.classList.toggle('warn', cfg.budgetWarn > 0 && total >= cfg.budgetWarn);
 }
 
@@ -2706,11 +2714,23 @@ function rotateViewedPhoto() {
   img.src = rec.dataUrl;
 }
 
+// メインの字幕表示を空に戻す（字幕ログのクリアと一緒に使う）
+function resetStage() {
+  const tEl = document.getElementById('translatedText');
+  tEl.textContent = '';
+  tEl.classList.remove('pending', 'long', 'xlong');
+  document.getElementById('originalText').textContent = '';
+  clearInterim();
+  // 停止中なら最初の案内を出し直す（LIVE 中は字幕を待つので出さない）
+  if (!isLive) document.getElementById('emptyState').classList.remove('hidden');
+}
+
 function clearHistory() {
   const photos = histData.filter(r => r.kind === 'photo').length;
   const notes  = histData.filter(r => r.kind === 'note').length;
   const extra  = [photos ? `写真${photos}枚` : '', notes ? `メモ${notes}件` : ''].filter(Boolean).join('・');
-  if (histData.length && !confirm(`字幕ログ${extra ? `と${extra}` : ''}を消去します。先に「レポート出力」で保存しましたか？`)) return;
+  if (histData.length && !confirm(`字幕ログ${extra ? `と${extra}` : ''}と、画面の字幕を消去します。先に「レポート出力」で保存しましたか？`)) return;
+  resetStage();
   histCount = 0;
   histData  = [];
   TL.clear();
@@ -2887,6 +2907,7 @@ function updateShotButton() {
   } else {
     btn.style.display = 'none';
   }
+  updateMemoShot();
 }
 
 async function takeShot() {
@@ -3272,8 +3293,32 @@ function openMemo(rec) {
   const ta = document.getElementById('memoText');
   ta.value = rec ? rec.text : '';
   document.getElementById('memoOverlay').style.display = 'flex';
+  updateMemoShot();
   setTimeout(() => ta.focus(), 50);
 }
+// PC版で画面共有中なら、メモ欄からもスクショを撮れるようにする（iPhone版はカメラが全画面になるので出さない）
+function updateMemoShot() {
+  const b = document.getElementById('memoShot');
+  if (!b) return;
+  const show = uiMode !== 'mobile' && audioSource === 'system';
+  b.style.display = show ? '' : 'none';
+  b.disabled = !(isLive && displayVideoTrack());
+}
+async function memoShot() {
+  const b = document.getElementById('memoShot');
+  if (b.disabled) return;
+  b.disabled = true;
+  await takeShot();               // 撮影時刻の位置に入る（メモは書き始めた時刻の位置のまま）
+  updateMemoShot();
+  document.getElementById('memoText').focus();
+}
+document.addEventListener('keydown', e => {
+  if (e.altKey && !e.ctrlKey && !e.metaKey && (e.key === 's' || e.key === 'S' || e.code === 'KeyS')
+      && document.getElementById('memoOverlay').style.display === 'flex') {
+    e.preventDefault();
+    memoShot();
+  }
+});
 function closeMemo() {
   memoEditing = null;
   document.getElementById('memoOverlay').style.display = 'none';
