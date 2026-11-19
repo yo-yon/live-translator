@@ -1,5 +1,5 @@
 {
-  "version": "2026-11-04.1",
+  "version": "2026-11-20.1",
   "note": "改善ループで更新するファイル。products は英語のまま残す製品名、hints は音声認識のヒントだけに使う一般語、asrFixes は聞き間違いの例（翻訳指示に入る）",
   "products": [
     "Power Platform",
@@ -145,7 +145,38 @@
     "GitHub Copilot",
     "GitHub Actions",
     "Visual Studio Code",
-    "VS Code"
+    "VS Code",
+    "GPT-5.5",
+    "GPT-5.4",
+    "GPT-5.4 mini",
+    "GPT-5.4 nano",
+    "GPT-5.2",
+    "GPT-5.1",
+    "GPT-5",
+    "GPT-5 mini",
+    "GPT-5 nano",
+    "GPT-4.1",
+    "GPT-4.1 mini",
+    "GPT-4.1 nano",
+    "GPT-4o",
+    "GPT-4o mini",
+    "GPT-4",
+    "GPT-3.5",
+    "GPT-3.5 Turbo",
+    "o1",
+    "o3",
+    "o3-mini",
+    "o4-mini",
+    "gpt-oss",
+    "Sora",
+    "model router",
+    "Claude",
+    "Gemini",
+    "Llama",
+    "Phi",
+    "Mistral",
+    "DeepSeek",
+    "Grok"
   ],
   "hints": [
     "agent",
@@ -234,6 +265,36 @@
     "lifecycle"
   ],
   "asrFixes": [
+    {
+      "heard": [
+        "GPT 35",
+        "GPT three point five",
+        "GPT 3 5"
+      ],
+      "correct": "GPT-3.5"
+    },
+    {
+      "heard": [
+        "GPT 40",
+        "GPT 4.0",
+        "GPT four oh"
+      ],
+      "correct": "GPT-4o"
+    },
+    {
+      "heard": [
+        "GPT 41",
+        "GPT four point one"
+      ],
+      "correct": "GPT-4.1"
+    },
+    {
+      "heard": [
+        "GPT 54",
+        "GPT five point four"
+      ],
+      "correct": "GPT-5.4"
+    },
     {
       "heard": [
         "Indian skills",
