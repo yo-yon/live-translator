@@ -539,9 +539,13 @@ header {
 .memo-actions .memo-save { background: #fbbf24; color: #111; border-color: #fbbf24; font-weight: 700; }
 .memo-actions .memo-del { margin-right: auto; color: #fca5a5; border-color: rgba(248,113,113,0.4); }
 .memo-tip { font-size: 11px; color: #4a5568; margin-top: 6px; }
-/* PC版のメモは画面を覆わない（字幕を見ながら書け、上のボタンも押せる） */
-body:not(.mobile) #memoOverlay { background: transparent; pointer-events: none; justify-content: flex-end; padding: 0 16px 16px; }
-body:not(.mobile) #memoOverlay .memo-sheet { pointer-events: auto; max-width: 440px; border-radius: 16px; box-shadow: 0 12px 40px rgba(0,0,0,0.55); }
+/* PC版のメモは字幕エリアの右に分割表示（閉じると字幕エリアが全幅に戻る） */
+.stage-row { position: relative; z-index: 1; flex: 1; display: flex; min-height: 0; }
+.stage-row > .stage { min-width: 0; }
+.memo-dock { display: none; flex-shrink: 0; width: clamp(300px, 30vw, 440px); border-left: 1px solid var(--border2); background: #0d1120; overflow-y: auto; }
+body.memo-docked .memo-dock { display: flex; flex-direction: column; }
+.memo-dock .memo-sheet { flex: 1; display: flex; flex-direction: column; max-width: none; border: none; border-radius: 0; background: transparent; padding: 14px 16px; }
+.memo-dock .memo-sheet textarea { flex: 1; min-height: 120px; resize: none; }
 .memo-actions .memo-shot:disabled { opacity: 0.4; cursor: not-allowed; }
 /* サーバー版／キー入力版の切り替え */
 .hosted-only { display: none !important; }
@@ -984,6 +988,7 @@ body.mobile .field input, body.mobile .field select { font-size: 16px; } /* iOS 
 </div>
 
 <!-- ===== SUBTITLE STAGE ===== -->
+<div class="stage-row">
 <div class="stage">
   <div class="empty-state" id="emptyState">
     <div class="empty-icon" id="emptyIcon">🎙</div>
@@ -1008,6 +1013,9 @@ body.mobile .field input, body.mobile .field select { font-size: 16px; } /* iOS 
     <div class="queue-preview-text" id="queuePreviewText"></div>
     <div class="queue-preview-count" id="queuePreviewCount"></div>
   </div>
+</div>
+<!-- PC版のメモ欄（開いている間だけ表示。中身は #memoOverlay のシートを移して使う） -->
+<aside class="memo-dock" id="memoDock"></aside>
 </div>
 
 <!-- ===== HISTORY ===== -->
@@ -1300,6 +1308,7 @@ function applyUiMode(mode) {
   // iPhone はシステム音声（画面共有）に非対応 → マイク固定
   if (mobile && audioSource !== 'mic') { audioSource = 'mic'; }
   updateSourceUI();
+  if (memoOpen) { placeMemo(); updateMemoShot(); }
   if (mobile) {
     // スピーカーで読み上げるとマイクが拾ってしまうため、既定は読み上げOFF（イヤホン使用時にON）
     const cb = document.getElementById('ttsToggle');
@@ -3292,9 +3301,21 @@ function openMemo(rec) {
   document.getElementById('memoDel').style.display = rec ? '' : 'none';
   const ta = document.getElementById('memoText');
   ta.value = rec ? rec.text : '';
-  document.getElementById('memoOverlay').style.display = 'flex';
+  memoOpen = true;
+  placeMemo();
   updateMemoShot();
   setTimeout(() => ta.focus(), 50);
+}
+// PC版は字幕エリアの右に分割表示、iPhone版は下から出す（版を切り替えたときも付け替える）
+var memoOpen = false;   // 起動時の applyUiMode から先に参照されるため var
+function placeMemo() {
+  const sheet   = document.querySelector('#memoOverlay .memo-sheet, #memoDock .memo-sheet');
+  const overlay = document.getElementById('memoOverlay');
+  const dock    = document.getElementById('memoDock');
+  const docked  = uiMode !== 'mobile';
+  (docked ? dock : overlay).appendChild(sheet);
+  overlay.style.display = memoOpen && !docked ? 'flex' : 'none';
+  document.body.classList.toggle('memo-docked', memoOpen && docked);
 }
 // PC版で画面共有中なら、メモ欄からもスクショを撮れるようにする（iPhone版はカメラが全画面になるので出さない）
 function updateMemoShot() {
@@ -3314,14 +3335,15 @@ async function memoShot() {
 }
 document.addEventListener('keydown', e => {
   if (e.altKey && !e.ctrlKey && !e.metaKey && (e.key === 's' || e.key === 'S' || e.code === 'KeyS')
-      && document.getElementById('memoOverlay').style.display === 'flex') {
+      && memoOpen) {
     e.preventDefault();
     memoShot();
   }
 });
 function closeMemo() {
   memoEditing = null;
-  document.getElementById('memoOverlay').style.display = 'none';
+  memoOpen = false;
+  placeMemo();
   keepAudioAlive();
 }
 function saveMemo() {
