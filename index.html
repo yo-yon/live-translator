@@ -884,7 +884,7 @@ body.mobile .field input, body.mobile .field select { font-size: 16px; } /* iOS 
   <div class="memo-sheet">
     <div class="memo-head"><b id="memoTitle">📝 メモ</b><span id="memoTime"></span></div>
     <textarea id="memoText" placeholder="気づき・所感・あとで調べること など"></textarea>
-    <div class="memo-tip">押した時刻の位置に入ります。翻訳は止まりません。iPhone はキーボードの音声入力を使うとマイクが取られるので、手入力してください。</div>
+    <div class="memo-tip">「保存」を押した時刻の位置に入ります。翻訳は止まりません。iPhone はキーボードの音声入力を使うとマイクが取られるので、手入力してください。</div>
     <div class="memo-actions">
       <button class="memo-del" id="memoDel" onclick="deleteMemo()" style="display:none">削除</button>
       <button class="memo-shot" id="memoShot" onclick="memoShot()" style="display:none" title="メモを書いたまま、画面共有中のスライドを撮影（Alt+S）">📸 スクショ</button>
@@ -2629,7 +2629,7 @@ function addPhotoRecord(dataUrl, source) {
   return pushRecord({ kind: 'photo', ...stampNow(), source, dataUrl });
 }
 
-// 記録を時刻順の位置に入れる（メモは書き始めた時刻なので、後から前に差し込まれることがある）
+// 記録を時刻順の位置に入れる（復元や編集で、後から前に差し込まれることがある）
 function pushRecord(rec) {
   histCount++;
   rec.no = histCount;
@@ -3293,11 +3293,11 @@ async function saveFeedback() {
 
 function openMemo(rec) {
   memoEditing = rec || null;
-  memoTs = rec ? rec.ts : Date.now();   // 押した時刻の位置に入れる（書いている間に進んだ字幕より前）
-  const d = new Date(memoTs);
+  memoTs = rec ? rec.ts : 0;   // 新しいメモは「保存」を押した時刻の位置に入れる（編集は元の位置のまま）
   document.getElementById('memoTitle').textContent = rec ? '📝 メモを編集' : '📝 メモ';
-  document.getElementById('memoTime').textContent =
-    `${d.toLocaleTimeString('ja-JP', { hour:'2-digit', minute:'2-digit', second:'2-digit' })} の位置`;
+  document.getElementById('memoTime').textContent = rec
+    ? `${new Date(rec.ts).toLocaleTimeString('ja-JP', { hour:'2-digit', minute:'2-digit', second:'2-digit' })} の位置`
+    : '保存した時刻の位置に入ります';
   document.getElementById('memoDel').style.display = rec ? '' : 'none';
   const ta = document.getElementById('memoText');
   ta.value = rec ? rec.text : '';
@@ -3329,7 +3329,7 @@ async function memoShot() {
   const b = document.getElementById('memoShot');
   if (b.disabled) return;
   b.disabled = true;
-  await takeShot();               // 撮影時刻の位置に入る（メモは書き始めた時刻の位置のまま）
+  await takeShot();               // 撮影時刻の位置に入る（メモは保存した時刻の位置に入る）
   updateMemoShot();
   document.getElementById('memoText').focus();
 }
@@ -3355,7 +3355,7 @@ function saveMemo() {
     const el = histEl(memoEditing.no);
     if (el) el.querySelector('.hist-note').textContent = '📝 ' + text;
   } else {
-    addNoteRecord(text, memoTs);
+    addNoteRecord(text, Date.now());
     setStatus('📝 メモを字幕ログに追加しました');
   }
   closeMemo();
