@@ -1802,7 +1802,7 @@ async function startLiveInner(audioCtx) {
 const FRAG_HOLD_MS   = 5000;  // 次の発話がこの時間来なければ、断片のまま訳す
 const FRAG_MAX_WORDS = 40;    // つなげてもこの語数を超えたら、そこで訳す
 const FRAG_TAIL = /\b(and|or|but|so|the|a|an|to|of|with|for|in|at|by|from|into|that|which|who|these|those|your|my|our|their|is|are|was|were|be|if|when|because|as|than|like|uh|um)[\s.,…-]*$/i;
-let fragBuf = null;   // { text, timer, sid }
+let fragBuf = null;   // { text, timer, sid, spokenAt }
 const wordCount = t => (t.trim().match(/\S+/g) || []).length;
 function isFragment(t) {
   const s = t.trim();
@@ -1812,29 +1812,30 @@ function isFragment(t) {
 function clearFragment() {
   if (fragBuf) { clearTimeout(fragBuf.timer); fragBuf = null; }
 }
-function handleLlmUtterance(text, srcCode, tgtCode) {
+function handleLlmUtterance(text, srcCode, tgtCode, spokenAt) {
   if (fragBuf && fragBuf.sid === liveSessionId) {
     text = `${fragBuf.text} ${text}`;
+    spokenAt = fragBuf.spokenAt || spokenAt;   // つなげた発話は、最初の断片を話し始めた時刻
   }
   clearFragment();
   if (cfg.mergeFragments !== 'off' && isFragment(text) && wordCount(text) < FRAG_MAX_WORDS) {
     const sid = liveSessionId;
     fragBuf = {
-      text, sid,
+      text, sid, spokenAt,
       timer: setTimeout(() => {
         if (!fragBuf || fragBuf.sid !== sid) return;
         const t = fragBuf.text;
         fragBuf = null;
         clearInterim();
-        if (isLive && sid === liveSessionId) dispatchLlm(t, srcCode, tgtCode);
+        if (isLive && sid === liveSessionId) dispatchLlm(t, srcCode, tgtCode, spokenAt);
       }, FRAG_HOLD_MS),
     };
     setInterim(text);   // 訳す前の英文として薄く表示しておく
     return;
   }
-  dispatchLlm(text, srcCode, tgtCode);
+  dispatchLlm(text, srcCode, tgtCode, spokenAt);
 }
-function dispatchLlm(original, srcCode, tgtCode) {
+function dispatchLlm(original, srcCode, tgtCode, spokenAt) {
   // ★ 翻訳は並列に開始し、表示は発話順を守る（translationChain で直列化）
   const context = srcHistory.slice(-cfg.ctxCount).map(h => ({ src: h.src, ja: h.ja }));
   const hist = { src: original, ja: '' };
@@ -1846,7 +1847,7 @@ function dispatchLlm(original, srcCode, tgtCode) {
   showTranslating(original);
   translationChain = translationChain
     .then(() => pending)
-    .then(res => { if (isLive && sid === liveSessionId) enqueue(original, res.text, res.engine); })
+    .then(res => { if (isLive && sid === liveSessionId) enqueue(original, res.text, res.engine, spokenAt); })
     .catch(err => console.error('translation chain error:', err));
 }
 
@@ -1932,14 +1933,17 @@ function connectSpeech() {
     lastSpeechAt = Date.now();
     clearInterim();
     const original = e.result.text;
+    // 話し始めた時刻（字幕ログの時刻。写真・スクショと同じ時間軸に並べる）。duration は 100ns 単位
+    const durMs = Number(e.result.duration) / 10000;
+    const spokenAt = Date.now() - (Number.isFinite(durMs) && durMs > 0 && durMs < 60000 ? Math.round(durMs) : 0);
 
     if (useLlm) {
-      handleLlmUtterance(original, srcCode, tgtCode);
+      handleLlmUtterance(original, srcCode, tgtCode, spokenAt);
     } else {
       const translated = (srcCode === tgtCode)
         ? original
         : (e.result.translations?.get(tgtCode) || original);
-      enqueue(original, translated, 'speech');
+      enqueue(original, translated, 'speech', spokenAt);
     }
     setStatus('認識中...');
   };
@@ -2350,8 +2354,8 @@ document.addEventListener('visibilitychange', () => {
 });
 
 // ===== TTS Queue =====
-function enqueue(original, translated, engine = 'speech') {
-  ttsQueue.push({ original, translated, engine });
+function enqueue(original, translated, engine = 'speech', spokenAt) {
+  ttsQueue.push({ original, translated, engine, spokenAt });
   updateQueueBadge();
   if (!ttsPlaying) drainQueue();
 }
@@ -2365,19 +2369,19 @@ async function drainQueue() {
     return;
   }
   ttsPlaying = true;
-  const { original, translated, engine } = ttsQueue.shift();
+  const { original, translated, engine, spokenAt } = ttsQueue.shift();
   updateQueueBadge();
 
   // 意味をなさない断片（訳が「…」）は字幕を差し替えず、読み上げもしない。ログには残す
   if (isEmptyTranslation(translated)) {
-    addHistory(original, '…', engine);
+    addHistory(original, '…', engine, spokenAt);
     drainQueue();
     return;
   }
 
   // メインエリアに昇格して表示
   displaySubtitle(original, translated, engine);
-  addHistory(original, translated, engine);
+  addHistory(original, translated, engine, spokenAt);
 
   // 待機中の次のアイテムを待機エリアに表示（あれば）
   if (ttsQueue.length > 0) {
@@ -2604,8 +2608,9 @@ function updateQueueBadge() {
 // ===== 字幕ログ（字幕と写真を1本のタイムラインで管理）=====
 const ENGINE_LABEL = { llm: 'LLM', nmt: '機械翻訳(代替)', speech: 'Speech翻訳', source: '翻訳失敗' };
 
-function stampNow() {
-  const now = new Date();
+function stampNow(at) {
+  // at: 時刻(ms)。字幕は「話された時刻」で刻む（撮影した写真と同じ時間軸に並べるため）
+  const now = at ? new Date(at) : new Date();
   return {
     ts:   now.getTime(),
     time: now.toLocaleTimeString('ja-JP', { hour:'2-digit', minute:'2-digit', second:'2-digit' }),
@@ -2613,10 +2618,10 @@ function stampNow() {
   };
 }
 
-function addHistory(original, translated, engine = 'speech') {
+function addHistory(original, translated, engine = 'speech', spokenAt) {
   pushRecord({
     kind: 'text',
-    ...stampNow(),
+    ...stampNow(spokenAt),
     srcLang:    LANGS[cfg.srcLang]?.name || cfg.srcLang,
     tgtLang:    LANGS[cfg.tgtLang]?.name || cfg.tgtLang,
     original,
